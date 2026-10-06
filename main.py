@@ -43,7 +43,7 @@ def send_whatsapp(to_phone: str, message: str):
     url = f"{"https://7107.api.greenapi.com"}/waInstance{710722757201}/sendMessage/{"b3a2ccc5aa654185afdf4eaf22bd9c3a2b766efcc9d44ac1a3"}"
     
     # Build chatId correctly - to_phone should be just the number
-    chat_id = f"+252633732215@c.us"
+    chat_id = f"252633732215@c.us"
     
     payload = {
         "chatId": chat_id,
