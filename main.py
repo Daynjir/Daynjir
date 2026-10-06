@@ -53,11 +53,113 @@ def home():
 async def whatsapp_webhook(request: Request):
     data = await request.json()
     
-    # 🌟 ADD THIS SPECIFIC LINE HERE TO SHOW THE PAYLOAD IN RENDER:
     print(f"📥 RAW GREEN-API PAYHOOK PAYLOAD: {json.dumps(data)}")
     
-    if data.get("typeWebhook") != "incomingMessageReceived":
+    #  FIXED: Allow both incoming messages AND messages you type on your own instance phone
+    allowed_types = ["incomingMessageReceived", "outgoingMessageReceived"]
+    if data.get("typeWebhook") not in allowed_types:
         return {"status": "ignored"}
+        
+    sender_data = data.get("senderData", {})
+    sender_chat_id = sender_data.get("chatId")
+    if not sender_chat_id:
+        return {"status": "no_chat_id"}
+        
+    #  FIXED: Correctly get the clean phone number string from the text instead of a list object
+    sender_phone = sender_chat_id.split("@")[0]
+    
+    # Extract message text safely whether it's a standard text or extended link text
+    message_data = data.get("messageData", {})
+    type_message = message_data.get("typeMessage")
+    
+    message_text = ""
+    try:
+        if type_message == "textMessage":
+            message_text = message_data["textMessageData"]["textMessage"]
+        elif type_message == "extendedTextMessage":
+            message_text = message_data["extendedTextMessageData"]["text"]
+        else:
+            return {"status": "unsupported_message_type"}
+    except KeyError:
+        return {"status": "no_text_payload"}
+        
+    if not message_text:
+        return {"status": "empty_text"}
+    
+    # Check/Create shopkeeper safely with string layout parameters
+    try:
+        sk_query = supabase.table("shopkeepers").select("*").eq("phone_number", sender_phone).execute()
+        if not sk_query.data:
+            sk_insert = supabase.table("shopkeepers").insert({"phone_number": sender_phone}).execute()
+            shopkeeper_id = sk_insert.data[0]["id"]
+        else:
+            shopkeeper_id = sk_query.data[0]["id"]
+    except Exception as db_err:
+        print(f"❌ DATABASE ERROR (Shopkeepers Lookup): {db_err}")
+        return {"status": "shopkeeper_db_error"}
+
+    # Process unstructured text via Groq AI Cloud
+    chat_completion = groq_client.chat.completions.create(
+        messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": message_text}],
+        model="llama3-8b-8192",
+        temperature=0.0
+    )
+    
+    ai_response = chat_completion.choices.message.content.strip()
+    print(f"🤖 Groq AI Raw Output: {ai_response}")
+    
+    try:
+        clean_json = re.search(r'\{.*\}', ai_response, re.DOTALL).group()
+        parsed = json.loads(clean_json)
+    except Exception:
+        send_whatsapp(sender_phone, "❌ Daynjir waa fahmi waayay qoraalkaaga. Fadlan u qor si cad.")
+        return {"status": "parsing_failed"}
+
+    action = parsed.get("action", "ADD")
+    name = parsed.get("customer_name")
+    
+    if not name:
+        send_whatsapp(sender_phone, "❌ Magaca macmiilka si sax ah looma helin.")
+        return {"status": "incomplete_data"}
+
+    if action == "PAY":
+        try:
+            supabase.table("debtors").update({"is_paid": True}).eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").execute()
+            send_whatsapp(sender_phone, f"✅ Koontada {name} waxaa loo calaamadeeyay in la bixiyay!")
+            return {"status": "success_paid"}
+        except Exception as pay_err:
+            print(f"❌ DATABASE ERROR (Update Pay Status): {pay_err}")
+            return {"status": "pay_db_error"}
+
+    amount = parsed.get("amount")
+    days = parsed.get("days_until_due", 0)
+    debtor_phone = parsed.get("customer_phone")
+
+    if not amount:
+        send_whatsapp(sender_phone, "❌ Fadlan qor lacagta deynta si sax ah.")
+        return {"status": "incomplete_amount"}
+
+    promised_date = (datetime.utcnow() + timedelta(days=int(days if days is not None else 0))).date().isoformat()
+
+    try:
+        insert_payload = {
+            "shopkeeper_id": int(shopkeeper_id),
+            "name": str(name),
+            "amount": float(amount),
+            "promised_date": promised_date,
+            "phone_number": str(debtor_phone) if debtor_phone else None,
+            "is_paid": False
+        }
+        print(f"⚙️ Attempting Supabase Insert Payload: {insert_payload}")
+        
+        db_res = supabase.table("debtors").insert(insert_payload).execute()
+        print(f"✅ Supabase Database Response Data: {db_res.data}")
+        
+        send_whatsapp(sender_phone, f"✅ Deyntii waa la keydiyay!\n👤 Macmiilka: {name}\n💵 Lacagta: ${amount}\n📅 Ballanta: {promised_date}")
+        return {"status": "success_add"}
+    except Exception as insert_err:
+        print(f"❌ DATABASE ERROR (Debtors Insertion Failure): {insert_err}")
+        return {"status": "debtor_insert_db_error"}
 
     sender_chat_id = data["senderData"]["chatId"]
     # FIXED: Cleans string layout immediately to avoid array mismatches in Supabase filters
