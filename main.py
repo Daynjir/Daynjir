@@ -22,6 +22,7 @@ INSTANCE_ID = str(os.getenv("GREEN_API_INSTANCE_ID")).strip()
 GREEN_API_TOKEN = str(os.getenv("GREEN_API_TOKEN")).strip()
 GREEN_API_BASE = "https://green-api.com"
 
+
 SYSTEM_PROMPT = """You are Daynjir, a Somali debt management assistant for small shopkeepers. 
 Extract transaction intent from chaotic, unstructured Somali text into raw JSON. 
 Do not include any conversational filler, markdown syntax, or backticks.
@@ -36,30 +37,19 @@ Examples:
 'Cali 20$ oo bari ah' -> {"action": "ADD", "customer_name": "Cali", "amount": 20, "days_until_due": 1, "customer_phone": null}
 'Xasan baa 15 doolar qaatay maanta' -> {"action": "ADD", "customer_name": "Xasan", "amount": 15, "days_until_due": 0, "customer_phone": null}
 'Cali wuu bixiyay hantidii' -> {"action": "PAY", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": null}
+'Gaawe wuxuu bixiyay $5' -> {"action": "PAY", "customer_name": "Gaawe", "amount": 5, "days_until_due": null, "customer_phone": null}
 """
 
 def send_whatsapp(to_phone: str, message: str):
-    # Build URL with correct format
-    url = f"{"https://7107.api.greenapi.com"}/waInstance{710722757201}/sendMessage/{"b3a2ccc5aa654185afdf4eaf22bd9c3a2b766efcc9d44ac1a3"}"
-    
-    # Build chatId correctly - to_phone should be just the number
-    chat_id = f"252633732215@c.us"
-    
-    payload = {
-        "chatId": chat_id,
-        "message": message
-    }
-    
-    print(f"🔍 DEBUG - URL: {url}")
-    print(f"🔍 DEBUG - ChatID: {chat_id}")
-    print(f"🔍 DEBUG - Payload: {payload}")
-    
+    clean_phone = to_phone.lstrip("+")
+    url = f"{GREEN_API_BASE}/waInstance{INSTANCE_ID}/sendMessage/{GREEN_API_TOKEN}"
+    chat_id = f"{clean_phone}@c.us"
+    payload = {"chatId": chat_id, "message": message}
     try:
         res = requests.post(url, json=payload, timeout=10)
-        print(f"📡 Green-API Status: {res.status_code}")
-        print(f"📡 Green-API Response: {res.text}")
+        print(f"📡 Green-API Status: {res.status_code} - Response: {res.text}")
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Error sending WhatsApp: {e}")
 
 @app.get("/")
 def home():
@@ -79,7 +69,6 @@ async def whatsapp_webhook(request: Request):
     if not sender_chat_id:
         return {"status": "no_chat_id"}
         
-    # Extract clean phone number
     sender_phone = sender_chat_id.split("@")[0]
     
     message_data = data.get("messageData", {})
@@ -120,7 +109,6 @@ async def whatsapp_webhook(request: Request):
     )
     
     try:
-        # FIXED: Correct path to message content
         if isinstance(chat_completion, list):
             ai_response = chat_completion.get("message", {}).get("content", "").strip()
         else:
@@ -145,39 +133,35 @@ async def whatsapp_webhook(request: Request):
         send_whatsapp(sender_phone, "❌ Magaca macmiilka si sax ah looma helin.")
         return {"status": "incomplete_data"}
 
-  if action == "PAY":
-    try:
-        # First, find the debtor record
-        debtor_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").eq("is_paid", False).execute()
-        
-        if not debtor_query.data:
-            send_whatsapp(sender_phone, f"❌ Lama helin deyn magaca {name} ku qoran.")
-            return {"status": "debtor_not_found"}
-        
-        debtor = debtor_query.data[0]
-        current_amount = debtor["amount"]
-        
-        # If amount was specified in the payment message
-        if amount and amount > 0:
-            new_balance = current_amount - amount
+    if action == "PAY":
+        try:
+            debtor_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").eq("is_paid", False).execute()
             
-            if new_balance <= 0:
-                # Fully paid
-                supabase.table("debtors").update({"is_paid": True, "amount": 0}).eq("id", debtor["id"]).execute()
-                send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay deyntii oo dhan (${current_amount})!")
+            if not debtor_query.data:
+                send_whatsapp(sender_phone, f"❌ Lama helin deyn magaca {name} ku qoran.")
+                return {"status": "debtor_not_found"}
+            
+            debtor = debtor_query.data[0]
+            current_amount = debtor["amount"]
+            parsed_amount = parsed.get("amount")
+            
+            if parsed_amount and parsed_amount > 0:
+                new_balance = current_amount - parsed_amount
+                
+                if new_balance <= 0:
+                    supabase.table("debtors").update({"is_paid": True, "amount": 0}).eq("id", debtor["id"]).execute()
+                    send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay deyntii oo dhan (${current_amount})!")
+                else:
+                    supabase.table("debtors").update({"amount": new_balance}).eq("id", debtor["id"]).execute()
+                    send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay ${parsed_amount}. Haray: ${new_balance}")
             else:
-                # Partial payment - update remaining balance
-                supabase.table("debtors").update({"amount": new_balance}).eq("id", debtor["id"]).execute()
-                send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay ${amount}. Haray: ${new_balance}")
-        else:
-            # No amount specified - mark as fully paid
-            supabase.table("debtors").update({"is_paid": True}).eq("id", debtor["id"]).execute()
-            send_whatsapp(sender_phone, f"✅ Koontada {name} waxaa loo calaamadeeyay in la bixiyay!")
+                supabase.table("debtors").update({"is_paid": True}).eq("id", debtor["id"]).execute()
+                send_whatsapp(sender_phone, f"✅ Koontada {name} waxaa loo calaamadeeyay in la bixiyay!")
             
-        return {"status": "success_paid"}
-    except Exception as pay_err:
-        print(f"❌ DATABASE ERROR (Update Pay Status): {pay_err}")
-        return {"status": "pay_db_error"}
+            return {"status": "success_paid"}
+        except Exception as pay_err:
+            print(f"❌ DATABASE ERROR (Update Pay Status): {pay_err}")
+            return {"status": "pay_db_error"}
 
     amount = parsed.get("amount")
     days = parsed.get("days_until_due")
