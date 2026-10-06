@@ -20,13 +20,13 @@ groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 # Connect to your services using Render variables
 supabase: Client = create_client(os.getenv("https://eykvkchadrdqskfhpkcg.supabase.co"), os.getenv("sb_publishable_ydmpcYgVnHkbnFld6TXbxg_uaL2Gkej"))
 groq_client = Groq(api_key=os.getenv(api_key=os.getenv("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"))
+# Pull variables dynamically from your Render dashboard settings panel keys
+INSTANCE_ID = os.getenv("GREEN_API_INSTANCE_ID")
+GREEN_API_TOKEN = os.getenv("GREEN_API_TOKEN")
 
-# FIXED: Ensure clean string conversion and apply the correct api. prefix format
-INSTANCE_ID = str(os.getenv("710722757201")).strip()
-GREEN_API_TOKEN = str(os.getenv("b3a2ccc5aa654185afdf4eaf22bd9c3a2b766efcc9d44ac1a3")).strip()
+#  THE FIXED LINE: Python will insert your real numbers here safely at runtime
+GREEN_API_URL = f"https://green-api.com{INSTANCE_ID}"
 
-# CRUCIAL: Check that this line does NOT have "green-api.com" hardcoded right next to the variable
-GREEN_API_URL = https://7107.api.greenapi.com"
 
 
 SYSTEM_PROMPT = """You are Daynjir, a Somali debt management assistant for small shopkeepers. 
