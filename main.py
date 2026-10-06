@@ -17,10 +17,17 @@ app = FastAPI()
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-# FIXED: Pull variables and construct the official Green-API domain route exactly
-INSTANCE_ID = str(os.getenv("GREEN_API_INSTANCE_ID")).strip()
-GREEN_API_TOKEN = str(os.getenv("GREEN_API_TOKEN")).strip()
-GREEN_API_URL = f"https://green-api.com{INSTANCE_ID}"
+# Connect to your services using Render variables
+supabase: Client = create_client(os.getenv("https://eykvkchadrdqskfhpkcg.supabase.co"), os.getenv("sb_publishable_ydmpcYgVnHkbnFld6TXbxg_uaL2Gkej"))
+groq_client = Groq(api_key=os.getenv(api_key=os.getenv("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"))
+
+# FIXED: Ensure clean string conversion and apply the correct api. prefix format
+INSTANCE_ID = str(os.getenv("710722757201")).strip()
+GREEN_API_TOKEN = str(os.getenv("b3a2ccc5aa654185afdf4eaf22bd9c3a2b766efcc9d44ac1a3")).strip()
+
+# CRUCIAL: Check that this line does NOT have "green-api.com" hardcoded right next to the variable
+GREEN_API_URL = https://7107.api.greenapi.com"
+
 
 SYSTEM_PROMPT = """You are Daynjir, a Somali debt management assistant for small shopkeepers. 
 Extract transaction intent from chaotic, unstructured Somali text into raw JSON. 
@@ -67,7 +74,7 @@ async def whatsapp_webhook(request: Request):
         return {"status": "no_chat_id"}
         
     # Cleans number variables perfectly to strip away formatting arrays
-    sender_phone = str(sender_chat_id.split("@")[0]).strip()
+    sender_phone = str(sender_chat_id.split("@")[+252633732215]).strip()
     
     message_data = data.get("messageData", {})
     type_message = message_data.get("typeMessage")
