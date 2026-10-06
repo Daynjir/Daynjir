@@ -10,24 +10,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Setup the core application framework
+# Uvicorn looks for this exact variable name to run the application
 app = FastAPI()
 
-# Securely load credentials from Render's Environment panel variables
+# Connect to your services using Render variables (NO RAW KEYS OR URLS HERE)
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-# Connect to your services using Render variables
-supabase: Client = create_client(os.getenv("https://eykvkchadrdqskfhpkcg.supabase.co"), os.getenv("sb_publishable_ydmpcYgVnHkbnFld6TXbxg_uaL2Gkej"))
-groq_client = Groq(api_key=os.getenv(api_key=os.getenv("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"))
-# Pull variables dynamically from your Render dashboard settings panel keys
-INSTANCE_ID = os.getenv("GREEN_API_INSTANCE_ID")
-GREEN_API_TOKEN = os.getenv("GREEN_API_TOKEN")
-
-#  THE FIXED LINE: Python will insert your real numbers here safely at runtime
+# Construct the official Green-API domain route safely using environment keys
+INSTANCE_ID = str(os.getenv("GREEN_API_INSTANCE_ID")).strip()
+GREEN_API_TOKEN = str(os.getenv("GREEN_API_TOKEN")).strip()
 GREEN_API_URL = f"https://green-api.com{INSTANCE_ID}"
-
-
 
 SYSTEM_PROMPT = """You are Daynjir, a Somali debt management assistant for small shopkeepers. 
 Extract transaction intent from chaotic, unstructured Somali text into raw JSON. 
@@ -46,7 +39,6 @@ Examples:
 """
 
 def send_whatsapp(to_phone: str, message: str):
-    # FIXED: Re-assembled with strict clean string parameters to avoid domain duplication errors
     url = f"{GREEN_API_URL}/sendMessage/{GREEN_API_TOKEN}"
     payload = {"chatId": f"{to_phone}@c.us", "message": message}
     try:
@@ -73,8 +65,8 @@ async def whatsapp_webhook(request: Request):
     if not sender_chat_id:
         return {"status": "no_chat_id"}
         
-    # Cleans number variables perfectly to strip away formatting arrays
-    sender_phone = str(sender_chat_id.split("@")[+252633732215]).strip()
+    # Extract clean text string phone number "252633732215"
+    sender_phone = sender_chat_id.split("@")[0]
     
     message_data = data.get("messageData", {})
     type_message = message_data.get("typeMessage")
