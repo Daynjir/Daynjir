@@ -39,14 +39,27 @@ Examples:
 """
 
 def send_whatsapp(to_phone: str, message: str):
-    # FIXED: Build URL inside function with correct format
-    url = f"{GREEN_API_BASE}/waInstance{INSTANCE_ID}/sendMessage/{GREEN_API_TOKEN}"
-    payload = {"chatId": f"{to_phone}@c.us", "message": message}
+    # Build URL with correct format
+    url = f"{https://7107.api.greenapi.com}/waInstance{710722757201}/sendMessage/{b3a2ccc5aa654185afdf4eaf22bd9c3a2b766efcc9d44ac1a3}"
+    
+    # Build chatId correctly - to_phone should be just the number
+    chat_id = f"+252633732215@c.us"
+    
+    payload = {
+        "chatId": chat_id,
+        "message": message
+    }
+    
+    print(f"🔍 DEBUG - URL: {url}")
+    print(f"🔍 DEBUG - ChatID: {chat_id}")
+    print(f"🔍 DEBUG - Payload: {payload}")
+    
     try:
         res = requests.post(url, json=payload, timeout=10)
-        print(f"📡 Outbound Green-API Send Status: {res.status_code} - Response: {res.text}")
+        print(f"📡 Green-API Status: {res.status_code}")
+        print(f"📡 Green-API Response: {res.text}")
     except Exception as e:
-        print(f"❌ Error dispatching WhatsApp outbound request: {e}")
+        print(f"❌ Error: {e}")
 
 @app.get("/")
 def home():
