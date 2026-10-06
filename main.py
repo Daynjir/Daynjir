@@ -25,22 +25,6 @@ SYSTEM_PROMPT = """You are Daynjir, a Somali debt management assistant for small
 Extract transaction intent from chaotic, unstructured Somali text into raw JSON. 
 Do not include any conversational filler, markdown syntax, or backticks.
 
-Determine if the shopkeeper wants to ADD a new debt or mark an existing debt as PAID.
-Carefully calculate 'days_until_due' by finding the difference between today's date and the requested promise target deadline date mentioned in the message text.
-
-Response format: 
-{"action": "ADD" or "PAY", "customer_name": "string or null", "amount": number or null, "days_until_due": number or null, "customer_phone": "string or null"}
-
-Examples:
-'Cali 20$ oo bari ah' -> {"action": "ADD", "customer_name": "Cali", "amount": 20, "days_until_due": 1, "customer_phone": null}
-'Xasan baa 15 doolar qaatay maanta' -> {"action": "ADD", "customer_name": "Xasan", "amount": 15, "days_until_due": 0, "customer_phone": null}
-'Cali wuu bixiyay hantidii' -> {"action": "PAY", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": null}
-'Gaawe wuxuu bixiyay $5' -> {"action": "PAY", "customer_name": "Gaawe", "amount": 5, "days_until_due": null, "customer_phone": null}
-"""
-SYSTEM_PROMPT = """You are Daynjir, a Somali debt management assistant for small shopkeepers. 
-Extract transaction intent from chaotic, unstructured Somali text into raw JSON. 
-Do not include any conversational filler, markdown syntax, or backticks.
-
 Determine if the shopkeeper wants to ADD a new debt, mark an existing debt as PAID, or LIST their debts.
 Carefully calculate 'days_until_due' by finding the difference between today's date and the requested promise target deadline date mentioned in the message text.
 
@@ -58,19 +42,14 @@ Examples:
 """
 
 def send_whatsapp(to_phone: str, message: str):
-    clean_phone = to_phone.lstrip("+")
+    clean_phone = str(to_phone).lstrip("+").split("@")[0].strip()
     url = "https://7107.api.greenapi.com/waInstance710722757201/sendMessage/b3a2ccc5aa654185afdf4eaf22bd9c3a2b766efcc9d44ac1a3"
     chat_id = f"{clean_phone}@c.us"
     payload = {"chatId": chat_id, "message": message}
-    
-    # ADD THESE LINES FOR DEBUGGING:
     print(f"🔍 send_whatsapp called:")
     print(f"   to_phone: {to_phone}")
     print(f"   clean_phone: {clean_phone}")
     print(f"   chat_id: {chat_id}")
-    print(f"   payload: {payload}")
-    # END OF DEBUG LINES
-    
     try:
         res = requests.post(url, json=payload, timeout=10)
         print(f"📡 Green-API Status: {res.status_code} - Response: {res.text}")
@@ -92,15 +71,11 @@ async def whatsapp_webhook(request: Request):
         
     sender_data = data.get("senderData", {})
     sender_chat_id = sender_data.get("chatId")
-    
     if not sender_chat_id:
         return {"status": "no_chat_id"}
-    
-    # Extract the sender's phone number (NOT your number!)
+        
     sender_phone = sender_chat_id.split("@")[0]
-    print(f"🔍 SENDER PHONE: {sender_phone}")  # Add this debug line
-    
-    # ... rest of your code
+    print(f"🔍 SENDER PHONE: {sender_phone}")
     
     message_data = data.get("messageData", {})
     type_message = message_data.get("typeMessage")
@@ -160,7 +135,7 @@ async def whatsapp_webhook(request: Request):
     action = parsed.get("action", "ADD")
     name = parsed.get("customer_name")
     
-    if not name:
+    if not name and action != "LIST":
         send_whatsapp(sender_phone, "❌ Magaca macmiilka si sax ah looma helin.")
         return {"status": "incomplete_data"}
 
@@ -173,32 +148,7 @@ async def whatsapp_webhook(request: Request):
             if not debtor_query.data:
                 send_whatsapp(sender_phone, f"❌ Lama helin deynta {name}.")
                 return {"status": "debtor_not_found"}
-        if action == "LIST":
-        try:
-            # Get unpaid debts for this shopkeeper
-            debts_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).eq("is_paid", False).order("promised_date", desc=False).execute()
             
-            if not debts_query.data:
-                send_whatsapp(sender_phone, "✅ Deyn la bixin lama hayo. All debts are paid!")
-                return {"status": "success_list_empty"}
-            
-            # Build the list
-            debt_list = []
-            total = 0
-            for i, debt in enumerate(debts_query.data, 1):
-                debt_list.append(f"{i}. {debt['name']}: ${debt['amount']} (Due: {debt['promised_date']})")
-                total += debt['amount']
-            
-            message = f"📋 *Liiska Deynta* ({len(debts_query.data)} debtor(s)):\n\n" + "\n".join(debt_list)
-            message += f"\n\n💰 **Total: ${total:.2f}**"
-            
-            send_whatsapp(sender_phone, message)
-            return {"status": "success_list"}
-        except Exception as list_err:
-            print(f"❌ DATABASE ERROR (List Debts): {list_err}")
-            return {"status": "list_db_error"}
-
-    # ADD section continues below...        
             debtor = debtor_query.data[0]
             current_balance = float(debtor["amount"])
             
@@ -226,6 +176,29 @@ async def whatsapp_webhook(request: Request):
         except Exception as pay_err:
             print(f"❌ DATABASE ERROR (Update Pay Status): {pay_err}")
             return {"status": "pay_db_error"}
+
+    if action == "LIST":
+        try:
+            debts_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).eq("is_paid", False).order("promised_date", desc=False).execute()
+            
+            if not debts_query.data:
+                send_whatsapp(sender_phone, "✅ Deyn la bixin lama hayo. All debts are paid!")
+                return {"status": "success_list_empty"}
+            
+            debt_list = []
+            total = 0
+            for i, debt in enumerate(debts_query.data, 1):
+                debt_list.append(f"{i}. {debt['name']}: ${debt['amount']} (Due: {debt['promised_date']})")
+                total += debt['amount']
+            
+            message = f"📋 *Liiska Deynta* ({len(debts_query.data)} debtor(s)):\n\n" + "\n".join(debt_list)
+            message += f"\n\n💰 **Total: ${total:.2f}**"
+            
+            send_whatsapp(sender_phone, message)
+            return {"status": "success_list"}
+        except Exception as list_err:
+            print(f"❌ DATABASE ERROR (List Debts): {list_err}")
+            return {"status": "list_db_error"}
 
     amount = parsed.get("amount")
     days = parsed.get("days_until_due")
