@@ -64,10 +64,15 @@ async def whatsapp_webhook(request: Request):
         
     sender_data = data.get("senderData", {})
     sender_chat_id = sender_data.get("chatId")
+    
     if not sender_chat_id:
         return {"status": "no_chat_id"}
-        
+    
+    # Extract the sender's phone number (NOT your number!)
     sender_phone = sender_chat_id.split("@")[0]
+    print(f"🔍 SENDER PHONE: {sender_phone}")  # Add this debug line
+    
+    # ... rest of your code
     
     message_data = data.get("messageData", {})
     type_message = message_data.get("typeMessage")
