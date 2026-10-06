@@ -17,9 +17,11 @@ supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("https://e
 groq_client = Groq(api_key=os.getenv("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"))
 
 # FIXED: Correct URL structure for Green-API endpoints
-INSTANCE_ID = os.getenv("710722757201")
+#  The Fixed Line:
+INSTANCE_ID = os.getenv("GREEN_API_INSTANCE_ID")
+GREEN_API_URL = f"https://green-api.com{INSTANCE_ID}"
 GREEN_API_TOKEN = os.getenv("b3a2ccc5aa654185afdf4eaf22bd9c3a2b766efcc9d44ac1a3")
-GREEN_API_URL = https://7107.api.greenapi.com{710722757201}"
+
 
 SYSTEM_PROMPT = """You are Daynjir, a Somali debt management assistant for small shopkeepers. 
 Extract transaction intent from chaotic, unstructured Somali text into raw JSON. 
