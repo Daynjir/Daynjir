@@ -41,8 +41,17 @@ Examples:
 def send_whatsapp(to_phone: str, message: str):
     clean_phone = to_phone.lstrip("+")
     url = "https://7107.api.greenapi.com/waInstance710722757201/sendMessage/b3a2ccc5aa654185afdf4eaf22bd9c3a2b766efcc9d44ac1a3"
-    chat_id = f"252633732215@c.us"
+    chat_id = f"{clean_phone}@c.us"
     payload = {"chatId": chat_id, "message": message}
+    
+    # ADD THESE LINES FOR DEBUGGING:
+    print(f"🔍 send_whatsapp called:")
+    print(f"   to_phone: {to_phone}")
+    print(f"   clean_phone: {clean_phone}")
+    print(f"   chat_id: {chat_id}")
+    print(f"   payload: {payload}")
+    # END OF DEBUG LINES
+    
     try:
         res = requests.post(url, json=payload, timeout=10)
         print(f"📡 Green-API Status: {res.status_code} - Response: {res.text}")
