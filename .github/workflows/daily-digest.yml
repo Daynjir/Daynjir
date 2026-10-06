@@ -1,0 +1,17 @@
+name: Daily Debt Digest
+
+on:
+  schedule:
+    # Runs at 4:00 AM UTC daily = 7:00 AM EAT (East Africa Time)
+    - cron: '0 4 * * *'
+  workflow_dispatch:  # Allows you to test manually from GitHub Actions tab
+
+jobs:
+  send-digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Daynjir Daily Digest Endpoint
+        run: |
+          echo "📬 Sending daily debt digest..."
+          curl -X GET https://daynjir.onrender.com/cron/daily-digest
+          echo "✅ Done!"
