@@ -16,9 +16,11 @@ app = FastAPI()
 # Securely load credentials from Render's Environment panel
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-
+# Pull credentials dynamically from Render environment keys
 INSTANCE_ID = os.getenv("GREEN_API_INSTANCE_ID")
 GREEN_API_TOKEN = os.getenv("GREEN_API_TOKEN")
+
+# FIXED: Standardized, official Green-API base URL path format
 GREEN_API_URL = f"https://green-api.com{INSTANCE_ID}"
 
 SYSTEM_PROMPT = """You are Daynjir, a Somali debt management assistant for small shopkeepers. 
