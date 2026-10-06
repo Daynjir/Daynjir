@@ -17,11 +17,9 @@ app = FastAPI()
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-# FIXED: Load Green-API credentials properly
-INSTANCE_ID = str(os.getenv("GREEN_API_INSTANCE_ID")).strip()
-GREEN_API_TOKEN = str(os.getenv("GREEN_API_TOKEN")).strip()
-GREEN_API_BASE = "https://green-api.com"
-
+INSTANCE_ID = "710722757201"
+GREEN_API_TOKEN = "b3a2ccc5aa654185afdf4eaf22bd9c3a2b766efcc9d44ac1a3"
+GREEN_API_BASE = "https://7107.api.greenapi.com"
 
 SYSTEM_PROMPT = """You are Daynjir, a Somali debt management assistant for small shopkeepers. 
 Extract transaction intent from chaotic, unstructured Somali text into raw JSON. 
@@ -42,7 +40,7 @@ Examples:
 
 def send_whatsapp(to_phone: str, message: str):
     clean_phone = to_phone.lstrip("+")
-url = "https://7107.api.greenapi.com/waInstance710722757201/sendMessage/b3a2ccc5aa654185afdf4eaf22bd9c3a2b766efcc9d44ac1a3"
+    url = "https://7107.api.greenapi.com/waInstance710722757201/sendMessage/b3a2ccc5aa654185afdf4eaf22bd9c3a2b766efcc9d44ac1a3"
     chat_id = f"252633732215@c.us"
     payload = {"chatId": chat_id, "message": message}
     try:
@@ -135,30 +133,38 @@ async def whatsapp_webhook(request: Request):
 
     if action == "PAY":
         try:
-            debtor_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").eq("is_paid", False).execute()
+            payment_amount = parsed.get("amount")
+            
+            debtor_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").eq("is_paid", False).order("id", desc=False).limit(1).execute()
             
             if not debtor_query.data:
-                send_whatsapp(sender_phone, f"❌ Lama helin deyn magaca {name} ku qoran.")
+                send_whatsapp(sender_phone, f"❌ Lama helin deynta {name}.")
                 return {"status": "debtor_not_found"}
             
             debtor = debtor_query.data[0]
-            current_amount = debtor["amount"]
-            parsed_amount = parsed.get("amount")
+            current_balance = float(debtor["amount"])
             
-            if parsed_amount and parsed_amount > 0:
-                new_balance = current_amount - parsed_amount
-                
-                if new_balance <= 0:
-                    supabase.table("debtors").update({"is_paid": True, "amount": 0}).eq("id", debtor["id"]).execute()
-                    send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay deyntii oo dhan (${current_amount})!")
-                else:
-                    supabase.table("debtors").update({"amount": new_balance}).eq("id", debtor["id"]).execute()
-                    send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay ${parsed_amount}. Haray: ${new_balance}")
+            if payment_amount is None:
+                supabase.table("debtors").update({"amount": 0, "is_paid": True}).eq("id", debtor["id"]).execute()
+                send_whatsapp(sender_phone, f"✅ Deynta {name} oo dhan waa la bixiyay.")
+                return {"status": "success_paid_full"}
+            
+            payment_amount = float(payment_amount)
+            
+            if payment_amount <= 0:
+                send_whatsapp(sender_phone, "❌ Lacagta bixinta waa inay ka weynaataa eber.")
+                return {"status": "invalid_payment_amount"}
+            
+            remaining_balance = current_balance - payment_amount
+            
+            if remaining_balance <= 0:
+                supabase.table("debtors").update({"amount": 0, "is_paid": True}).eq("id", debtor["id"]).execute()
+                send_whatsapp(sender_phone, f"✅ {name} wuxuu bixiyay ${payment_amount:.2f}. Deyntii oo dhan waa la bixiyay.")
             else:
-                supabase.table("debtors").update({"is_paid": True}).eq("id", debtor["id"]).execute()
-                send_whatsapp(sender_phone, f"✅ Koontada {name} waxaa loo calaamadeeyay in la bixiyay!")
+                supabase.table("debtors").update({"amount": round(remaining_balance, 2)}).eq("id", debtor["id"]).execute()
+                send_whatsapp(sender_phone, f"✅ {name} wuxuu bixiyay ${payment_amount:.2f}. Haraaga: ${remaining_balance:.2f}")
             
-            return {"status": "success_paid"}
+            return {"status": "success_partial_payment"}
         except Exception as pay_err:
             print(f"❌ DATABASE ERROR (Update Pay Status): {pay_err}")
             return {"status": "pay_db_error"}
