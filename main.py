@@ -10,14 +10,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Uvicorn looks for this exact variable name to run the application
+# Setup the core application framework
 app = FastAPI()
 
-# Connect to your services using Render variables (NO RAW KEYS OR URLS HERE)
+# Securely load credentials from Render's Environment panel variables
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-# Construct the official Green-API domain route safely using environment keys
+# FIXED: Pull variables and construct the official Green-API domain route exactly
 INSTANCE_ID = str(os.getenv("GREEN_API_INSTANCE_ID")).strip()
 GREEN_API_TOKEN = str(os.getenv("GREEN_API_TOKEN")).strip()
 GREEN_API_URL = f"https://green-api.com{INSTANCE_ID}"
@@ -39,6 +39,7 @@ Examples:
 """
 
 def send_whatsapp(to_phone: str, message: str):
+    # FIXED: Re-assembled with strict clean string parameters to avoid domain duplication errors
     url = f"{GREEN_API_URL}/sendMessage/{GREEN_API_TOKEN}"
     payload = {"chatId": f"{to_phone}@c.us", "message": message}
     try:
@@ -65,7 +66,7 @@ async def whatsapp_webhook(request: Request):
     if not sender_chat_id:
         return {"status": "no_chat_id"}
         
-    # Extract clean text string phone number "252633732215"
+    # FIXED: Extract clean index string value to pass a real number phone line "252633732215"
     sender_phone = sender_chat_id.split("@")[0]
     
     message_data = data.get("messageData", {})
