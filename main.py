@@ -17,10 +17,10 @@ app = FastAPI()
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-# FIXED: Pull variables and construct the official Green-API domain route exactly
+# FIXED: Load Green-API credentials properly
 INSTANCE_ID = str(os.getenv("GREEN_API_INSTANCE_ID")).strip()
 GREEN_API_TOKEN = str(os.getenv("GREEN_API_TOKEN")).strip()
-url = f"https://green-api.com/waInstance/{instance_id}/sendMessage/{token}"
+GREEN_API_BASE = "https://green-api.com"
 
 SYSTEM_PROMPT = """You are Daynjir, a Somali debt management assistant for small shopkeepers. 
 Extract transaction intent from chaotic, unstructured Somali text into raw JSON. 
@@ -39,9 +39,9 @@ Examples:
 """
 
 def send_whatsapp(to_phone: str, message: str):
-    # FIXED: Re-assembled with strict clean string parameters to avoid domain duplication errors
-    url = f"{GREEN_API_URL}/sendMessage/{GREEN_API_TOKEN}"
-    payload = {"chatId": f"+252633732215@c.us", "message": message}
+    # FIXED: Build URL inside function with correct format
+    url = f"{GREEN_API_BASE}/waInstance{INSTANCE_ID}/sendMessage/{GREEN_API_TOKEN}"
+    payload = {"chatId": f"{to_phone}@c.us", "message": message}
     try:
         res = requests.post(url, json=payload, timeout=10)
         print(f"📡 Outbound Green-API Send Status: {res.status_code} - Response: {res.text}")
@@ -66,7 +66,7 @@ async def whatsapp_webhook(request: Request):
     if not sender_chat_id:
         return {"status": "no_chat_id"}
         
-    # FIXED: Extract clean index string value to pass a real number phone line "252633732215"
+    # Extract clean phone number
     sender_phone = sender_chat_id.split("@")[0]
     
     message_data = data.get("messageData", {})
@@ -107,10 +107,11 @@ async def whatsapp_webhook(request: Request):
     )
     
     try:
+        # FIXED: Correct path to message content
         if isinstance(chat_completion, list):
             ai_response = chat_completion.get("message", {}).get("content", "").strip()
         else:
-            ai_response = chat_completion.choices.message.content.strip()
+            ai_response = chat_completion.choices[0].message.content.strip()
     except Exception as parse_err:
         print(f"⚠️ Direct extraction failed, casting raw string: {parse_err}")
         ai_response = str(chat_completion).strip()
