@@ -10,8 +10,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# CRUCIAL: Uvicorn needs this variable name exactly to run
 app = FastAPI()
 
+# Connect to your services using Render variables
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
@@ -50,7 +52,7 @@ async def whatsapp_webhook(request: Request):
         return {"status": "ignored"}
         
     sender_chat_id = data["senderData"]["chatId"]
-    # FIXED: Added [0] string index selector to avoid passing a list object to SQL query filters
+    # FIXED: Extract clean phone string from list to prevent SQL insert criteria failures
     sender_phone = sender_chat_id.split("@")[0]
     
     try:
@@ -58,7 +60,6 @@ async def whatsapp_webhook(request: Request):
     except KeyError:
         return {"status": "no_text_payload"}
     
-    # Check/Create shopkeeper safely with debugging try blocks
     try:
         sk_query = supabase.table("shopkeepers").select("*").eq("phone_number", sender_phone).execute()
         if not sk_query.data:
@@ -113,7 +114,6 @@ async def whatsapp_webhook(request: Request):
     promised_date = (datetime.utcnow() + timedelta(days=int(days if days is not None else 0))).date().isoformat()
 
     try:
-        # Save debtor row records directly with comprehensive console print statement tracking
         insert_payload = {
             "shopkeeper_id": int(shopkeeper_id),
             "name": str(name),
