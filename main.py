@@ -14,7 +14,7 @@ app = FastAPI()
 
 # Connect to services
 #  The Fixed Line 16:
-supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+supabase: Client = create_client(os.getenv("https://eykvkchadrdqskfhpkcg.supabase.co"), os.getenv("sb_publishable_ydmpcYgVnHkbnFld6TXbxg_uaL2Gkej"))
 
 
 # FIXED: Correct URL structure for Green-API endpoints
