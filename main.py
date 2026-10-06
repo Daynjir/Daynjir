@@ -145,14 +145,39 @@ async def whatsapp_webhook(request: Request):
         send_whatsapp(sender_phone, "❌ Magaca macmiilka si sax ah looma helin.")
         return {"status": "incomplete_data"}
 
-    if action == "PAY":
-        try:
-            supabase.table("debtors").update({"is_paid": True}).eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").execute()
+  if action == "PAY":
+    try:
+        # First, find the debtor record
+        debtor_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").eq("is_paid", False).execute()
+        
+        if not debtor_query.data:
+            send_whatsapp(sender_phone, f"❌ Lama helin deyn magaca {name} ku qoran.")
+            return {"status": "debtor_not_found"}
+        
+        debtor = debtor_query.data[0]
+        current_amount = debtor["amount"]
+        
+        # If amount was specified in the payment message
+        if amount and amount > 0:
+            new_balance = current_amount - amount
+            
+            if new_balance <= 0:
+                # Fully paid
+                supabase.table("debtors").update({"is_paid": True, "amount": 0}).eq("id", debtor["id"]).execute()
+                send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay deyntii oo dhan (${current_amount})!")
+            else:
+                # Partial payment - update remaining balance
+                supabase.table("debtors").update({"amount": new_balance}).eq("id", debtor["id"]).execute()
+                send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay ${amount}. Haray: ${new_balance}")
+        else:
+            # No amount specified - mark as fully paid
+            supabase.table("debtors").update({"is_paid": True}).eq("id", debtor["id"]).execute()
             send_whatsapp(sender_phone, f"✅ Koontada {name} waxaa loo calaamadeeyay in la bixiyay!")
-            return {"status": "success_paid"}
-        except Exception as pay_err:
-            print(f"❌ DATABASE ERROR (Update Pay Status): {pay_err}")
-            return {"status": "pay_db_error"}
+            
+        return {"status": "success_paid"}
+    except Exception as pay_err:
+        print(f"❌ DATABASE ERROR (Update Pay Status): {pay_err}")
+        return {"status": "pay_db_error"}
 
     amount = parsed.get("amount")
     days = parsed.get("days_until_due")
