@@ -106,7 +106,7 @@ async def whatsapp_webhook(request: Request):
     # FIXED: Using Groq's active production text model name
     chat_completion = groq_client.chat.completions.create(
         messages=[{"role": "system", "content": dynamic_system_prompt}, {"role": "user", "content": message_text}],
-        model="llama-3.1-8b-instant",
+        model="llama-3.1-70b-versatile",
         temperature=0.0
     )
 
