@@ -101,7 +101,7 @@ async def whatsapp_webhook(request: Request):
     # Process unstructured text via Groq AI Cloud
     chat_completion = groq_client.chat.completions.create(
         messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": message_text}],
-        model="llama-3.1-8b-instant",
+        model="llama-3.3-70b-versatile",
         temperature=0.0
     )
     
