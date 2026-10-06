@@ -103,18 +103,29 @@ async def whatsapp_webhook(request: Request):
     today_str = datetime.utcnow().date().isoformat()
     dynamic_system_prompt = f"{SYSTEM_PROMPT}\nToday's date is strictly: {today_str}. Use this to calculate calendar targets or relative days offsets like 'berri'."
 
-    # FIXED: Replaced decommissioned name with Groq's active free-tier production text model
+       # Pass today's absolute calendar date context to help the LLM process deadline offsets
+    today_str = datetime.utcnow().date().isoformat()
+    dynamic_system_prompt = f"{SYSTEM_PROMPT}\nToday's date is strictly: {today_str}. Use this to calculate calendar targets or relative days offsets like 'berri'."
+
     chat_completion = groq_client.chat.completions.create(
         messages=[{"role": "system", "content": dynamic_system_prompt}, {"role": "user", "content": message_text}],
         model="openai/gpt-oss-20b",
         temperature=0.0
     )
-
-
     
-    ai_response = chat_completion.choices.message.content.strip()
-    print(f"🤖 Groq AI Raw Output: {ai_response}")
-    
+    #  FIXED: Robust handling to read content whether Groq returns an object or a list
+    try:
+        if isinstance(chat_completion, list):
+            ai_response = chat_completion[0].get("message", {}).get("content", "").strip()
+        else:
+            ai_response = chat_completion.choices[0].message.content.strip()
+    except Exception as parse_err:
+        # Fallback tracking if structure shifts drastically
+        print(f"⚠️ Direct extraction failed, casting raw string: {parse_err}")
+        ai_response = str(chat_completion).strip()
+        
+    print(f"🤖 Groq AI Processed Output: {ai_response}")
+
     try:
         clean_json = re.search(r'\{.*\}', ai_response, re.DOTALL).group()
         parsed = json.loads(clean_json)
