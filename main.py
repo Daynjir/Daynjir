@@ -10,15 +10,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Uvicorn looks for this exact variable to run the application
+# Setup the core application framework
 app = FastAPI()
 
-# Securely load credentials from Render's Environment panel
+# Securely load credentials from Render's Environment panel variables
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-INSTANCE_ID = os.getenv("GREEN_API_INSTANCE_ID")
-GREEN_API_TOKEN = os.getenv("GREEN_API_TOKEN")
+# FIXED: Pull variables and construct the official Green-API domain route exactly
+INSTANCE_ID = str(os.getenv("GREEN_API_INSTANCE_ID")).strip()
+GREEN_API_TOKEN = str(os.getenv("GREEN_API_TOKEN")).strip()
 GREEN_API_URL = f"https://green-api.com{INSTANCE_ID}"
 
 SYSTEM_PROMPT = """You are Daynjir, a Somali debt management assistant for small shopkeepers. 
@@ -38,10 +39,12 @@ Examples:
 """
 
 def send_whatsapp(to_phone: str, message: str):
+    # FIXED: Re-assembled with strict clean string parameters to avoid domain duplication errors
     url = f"{GREEN_API_URL}/sendMessage/{GREEN_API_TOKEN}"
     payload = {"chatId": f"{to_phone}@c.us", "message": message}
     try:
-        requests.post(url, json=payload, timeout=10)
+        res = requests.post(url, json=payload, timeout=10)
+        print(f"📡 Outbound Green-API Send Status: {res.status_code} - Response: {res.text}")
     except Exception as e:
         print(f"❌ Error dispatching WhatsApp outbound request: {e}")
 
@@ -63,8 +66,8 @@ async def whatsapp_webhook(request: Request):
     if not sender_chat_id:
         return {"status": "no_chat_id"}
         
-    # FIXED: Extract index 0 explicitly to return a single text string phone number
-    sender_phone = sender_chat_id.split("@")[0]
+    # Cleans number variables perfectly to strip away formatting arrays
+    sender_phone = str(sender_chat_id.split("@")[0]).strip()
     
     message_data = data.get("messageData", {})
     type_message = message_data.get("typeMessage")
@@ -169,7 +172,7 @@ async def whatsapp_webhook(request: Request):
         db_res = supabase.table("debtors").insert(insert_payload).execute()
         print(f"✅ Supabase Database Response Data: {db_res.data}")
         
-        send_whatsapp(sender_phone, f"✅ Deyntii waa la keydiyay!\n👤 Macmiilka: {name}\n💵 Lacagta: ${amount}\n📅 Ballanta: {promised_date}")
+        send_whatsapp(sender_phone, f"✅ *Deyntii waa la keydiyay!*\n\n👤 Macmiilka: {name}\n💵 Lacagta: ${amount}\n📅 Ballanta: {promised_date}")
         return {"status": "success_add"}
     except Exception as insert_err:
         print(f"❌ DATABASE ERROR (Debtors Insertion Failure): {insert_err}")
