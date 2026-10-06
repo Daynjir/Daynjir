@@ -13,8 +13,9 @@ load_dotenv()
 app = FastAPI()
 
 # Connect to services
-supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("https://eykvkchadrdqskfhpkcg.supabase.co"))
-groq_client = Groq(api_key=os.getenv("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"))
+#  The Fixed Line 16:
+supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+
 
 # FIXED: Correct URL structure for Green-API endpoints
 #  The Fixed Line:
