@@ -53,9 +53,12 @@ def home():
 async def whatsapp_webhook(request: Request):
     data = await request.json()
     
+    # 🌟 ADD THIS SPECIFIC LINE HERE TO SHOW THE PAYLOAD IN RENDER:
+    print(f"📥 RAW GREEN-API PAYHOOK PAYLOAD: {json.dumps(data)}")
+    
     if data.get("typeWebhook") != "incomingMessageReceived":
         return {"status": "ignored"}
-        
+
     sender_chat_id = data["senderData"]["chatId"]
     # FIXED: Cleans string layout immediately to avoid array mismatches in Supabase filters
     sender_phone = sender_chat_id.split("@")[0]
