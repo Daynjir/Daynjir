@@ -67,7 +67,8 @@ async def whatsapp_webhook(request: Request):
         return {"status": "no_chat_id"}
         
     #  FIXED: Correctly get the clean phone number string from the text instead of a list object
-    sender_phone = sender_chat_id.split("@")[0]
+    #  THE FIX: Add [0] at the end to get the clean text string "252633732215"
+sender_phone = sender_chat_id.split("@")[0]
     
     # Extract message text safely whether it's a standard text or extended link text
     message_data = data.get("messageData", {})
