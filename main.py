@@ -99,11 +99,17 @@ async def whatsapp_webhook(request: Request):
         return {"status": "shopkeeper_db_error"}
 
     # Process unstructured text via Groq AI Cloud
+      # Pass today's absolute calendar date context to help the LLM process deadline offsets
+    today_str = datetime.utcnow().date().isoformat()
+    dynamic_system_prompt = f"{SYSTEM_PROMPT}\nToday's date is strictly: {today_str}. Use this to calculate calendar targets or relative days offsets like 'berri'."
+
+    # FIXED: Using Groq's active production text model name
     chat_completion = groq_client.chat.completions.create(
-        messages=[{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": message_text}],
-        model="llama-3.3-70b-versatile",
+        messages=[{"role": "system", "content": dynamic_system_prompt}, {"role": "user", "content": message_text}],
+        model="llama-3.1-8b-instant",
         temperature=0.0
     )
+
     
     ai_response = chat_completion.choices.message.content.strip()
     print(f"🤖 Groq AI Raw Output: {ai_response}")
