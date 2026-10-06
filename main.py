@@ -20,7 +20,7 @@ groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 # FIXED: Pull variables and construct the official Green-API domain route exactly
 INSTANCE_ID = str(os.getenv("GREEN_API_INSTANCE_ID")).strip()
 GREEN_API_TOKEN = str(os.getenv("GREEN_API_TOKEN")).strip()
-GREEN_API_URL = f"https://green-api.com{INSTANCE_ID}"
+url = f"https://green-api.com/waInstance/{instance_id}/sendMessage/{token}"
 
 SYSTEM_PROMPT = """You are Daynjir, a Somali debt management assistant for small shopkeepers. 
 Extract transaction intent from chaotic, unstructured Somali text into raw JSON. 
@@ -41,7 +41,7 @@ Examples:
 def send_whatsapp(to_phone: str, message: str):
     # FIXED: Re-assembled with strict clean string parameters to avoid domain duplication errors
     url = f"{GREEN_API_URL}/sendMessage/{GREEN_API_TOKEN}"
-    payload = {"chatId": f"{to_phone}@c.us", "message": message}
+    payload = {"chatId": f"+252633732215@c.us", "message": message}
     try:
         res = requests.post(url, json=payload, timeout=10)
         print(f"📡 Outbound Green-API Send Status: {res.status_code} - Response: {res.text}")
