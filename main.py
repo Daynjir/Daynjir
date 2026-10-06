@@ -37,6 +37,25 @@ Examples:
 'Cali wuu bixiyay hantidii' -> {"action": "PAY", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": null}
 'Gaawe wuxuu bixiyay $5' -> {"action": "PAY", "customer_name": "Gaawe", "amount": 5, "days_until_due": null, "customer_phone": null}
 """
+SYSTEM_PROMPT = """You are Daynjir, a Somali debt management assistant for small shopkeepers. 
+Extract transaction intent from chaotic, unstructured Somali text into raw JSON. 
+Do not include any conversational filler, markdown syntax, or backticks.
+
+Determine if the shopkeeper wants to ADD a new debt, mark an existing debt as PAID, or LIST their debts.
+Carefully calculate 'days_until_due' by finding the difference between today's date and the requested promise target deadline date mentioned in the message text.
+
+Response format: 
+{"action": "ADD" or "PAY" or "LIST", "customer_name": "string or null", "amount": number or null, "days_until_due": number or null, "customer_phone": "string or null"}
+
+Examples:
+'Cali 20$ oo bari ah' -> {"action": "ADD", "customer_name": "Cali", "amount": 20, "days_until_due": 1, "customer_phone": null}
+'Xasan baa 15 doolar qaatay maanta' -> {"action": "ADD", "customer_name": "Xasan", "amount": 15, "days_until_due": 0, "customer_phone": null}
+'Cali wuu bixiyay hantidii' -> {"action": "PAY", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": null}
+'Gaawe wuxuu bixiyay $5' -> {"action": "PAY", "customer_name": "Gaawe", "amount": 5, "days_until_due": null, "customer_phone": null}
+'List my debts' -> {"action": "LIST", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null}
+'My debts' -> {"action": "LIST", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null}
+'Liiska deynta' -> {"action": "LIST", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null}
+"""
 
 def send_whatsapp(to_phone: str, message: str):
     clean_phone = to_phone.lstrip("+")
@@ -154,7 +173,32 @@ async def whatsapp_webhook(request: Request):
             if not debtor_query.data:
                 send_whatsapp(sender_phone, f"❌ Lama helin deynta {name}.")
                 return {"status": "debtor_not_found"}
+        if action == "LIST":
+        try:
+            # Get unpaid debts for this shopkeeper
+            debts_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).eq("is_paid", False).order("promised_date", desc=False).execute()
             
+            if not debts_query.data:
+                send_whatsapp(sender_phone, "✅ Deyn la bixin lama hayo. All debts are paid!")
+                return {"status": "success_list_empty"}
+            
+            # Build the list
+            debt_list = []
+            total = 0
+            for i, debt in enumerate(debts_query.data, 1):
+                debt_list.append(f"{i}. {debt['name']}: ${debt['amount']} (Due: {debt['promised_date']})")
+                total += debt['amount']
+            
+            message = f"📋 *Liiska Deynta* ({len(debts_query.data)} debtor(s)):\n\n" + "\n".join(debt_list)
+            message += f"\n\n💰 **Total: ${total:.2f}**"
+            
+            send_whatsapp(sender_phone, message)
+            return {"status": "success_list"}
+        except Exception as list_err:
+            print(f"❌ DATABASE ERROR (List Debts): {list_err}")
+            return {"status": "list_db_error"}
+
+    # ADD section continues below...        
             debtor = debtor_query.data[0]
             current_balance = float(debtor["amount"])
             
