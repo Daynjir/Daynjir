@@ -220,20 +220,29 @@ async def whatsapp_webhook(request: Request):
                 send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
                 failed_inserts.append({"name": name, "reason": f"Payment error: {str(e)}"})
         
-        elif action == "LIST":
+               elif action == "LIST":
             try:
                 debts_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).eq("is_paid", False).order("promised_date", desc=False).execute()
                 
                 if not debts_query.data:
                     send_whatsapp(sender_phone, "✅ Ma hayo Deyn aan la bixin. All debts are paid!")
                 else:
+                    # Check if user asked for due dates (balamaha/balamaha/balanta)
+                    show_due_dates = any(keyword in message_text.lower() for keyword in ['balamaha', 'balamaha', 'balanta', 'ballanta', 'due'])
+                    
                     debt_list = []
                     total = 0
                     for i, debt in enumerate(debts_query.data, 1):
-                        debt_list.append(f"{i}. {debt['name']}: ${debt['amount']} (Due: {debt['promised_date']})")
+                        if show_due_dates:
+                            debt_list.append(f"{i}. {debt['name']}: ${debt['amount']} - {debt['promised_date']}")
+                        else:
+                            debt_list.append(f"{i}. {debt['name']}: ${debt['amount']}")
                         total += debt['amount']
                     
-                    message = f"📋 *Liiska Deynta* ({len(debts_query.data)} debtor(s)):\n\n" + "\n".join(debt_list)
+                    if show_due_dates:
+                        message = f"📋 *Liiska Deynta iyo Balamaha* ({len(debts_query.data)} debtor(s)):\n\n" + "\n".join(debt_list)
+                    else:
+                        message = f"📋 *Liiska Deynta* ({len(debts_query.data)} debtor(s)):\n\n" + "\n".join(debt_list)
                     message += f"\n\n💰 **Total: ${total:.2f}**"
                     
                     send_whatsapp(sender_phone, message)
@@ -241,7 +250,6 @@ async def whatsapp_webhook(request: Request):
             except Exception as e:
                 send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
                 failed_inserts.append({"name": "LIST", "reason": f"List error: {str(e)}"})
-
     # Send confirmation for ADD actions
     if successful_inserts:
         if len(successful_inserts) == 1:
