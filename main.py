@@ -261,4 +261,3 @@ async def daily_digest():
             send_whatsapp(sk_phone, msg)
             
     return {"status": "done"}
-@
