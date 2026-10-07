@@ -547,23 +547,23 @@ async def whatsapp_webhook(request: Request):
     return {"status": "success"}
 
 
-@app.get("/cron/daily-digest")
-async def daily_digest():
-    today = datetime.utcnow().date().isoformat()
-    shopkeepers = supabase.table("shopkeepers").select("*").execute()
+@app.get("/cron/daily-digest")  # ← NO leading spaces
+async def daily_digest():  # ← NO leading spaces
+    today = datetime.utcnow().date().isoformat()  # ← 4 spaces
+    shopkeepers = supabase.table("shopkeepers").select("*").execute()  # ← 4 spaces
     
-    for sk in shopkeepers.data:
-        sk_id = sk["id"]
-        sk_phone = sk["phone_number"]
+    for sk in shopkeepers.data:  # ← 4 spaces
+        sk_id = sk["id"]  # ← 8 spaces
+        sk_phone = sk["phone_number"]  # ← 8 spaces
         
-        debt_records = supabase.table("debtors").select("*").eq("shopkeeper_id", sk_id).eq("is_paid", False).execute()
-        if not debt_records.data:
-            continue
+        debt_records = supabase.table("debtors").select("*").eq("shopkeeper_id", sk_id).eq("is_paid", False).execute()  # ← 8 spaces
+        if not debt_records.data:  # ← 8 spaces
+            continue  # ← 12 spaces
             
-              due_today = []
-        for record in debt_records.data:
-            if record["promised_date"] <= today:
-                due_today.append(f"• {record['name']}: ${record['amount']}")
+        due_today = []  # ← 8 spaces (CORRECT)
+        for record in debt_records.data:  # ← 8 spaces
+            if record["promised_date"] <= today:  # ← 12 spaces
+                due_today.append(f"• {record['name']}: ${record['amount']}")  # ← 12 spaces
 
 @app.post("/webhook")  # ← CORRECT: No indentation
 async def whatsapp_webhook(request: Request):  # ← CORRECT: No indentation
