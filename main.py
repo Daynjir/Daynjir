@@ -219,16 +219,109 @@ async def whatsapp_webhook(request: Request):
             except Exception as e:
                 send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
                 failed_inserts.append({"name": name, "reason": f"Payment error: {str(e)}"})
+    # Process each entry
+    successful_inserts = []
+    failed_inserts = []
+
+    for entry in entries:
+        action = entry.get("action", "ADD")
+        name = entry.get("customer_name")
+        amount = entry.get("amount")
+        promised_date = entry.get("promised_date")
+        days_until_due = entry.get("days_until_due")
         
-               elif action == "LIST":
+        # Validate name
+        if not name and action != "LIST":
+            failed_inserts.append({"name": "Unknown", "reason": "No name"})
+            continue
+        
+        if action == "ADD":
             try:
-                debts_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).eq("is_paid", False).order("promised_date", desc=False).execute()
+                # Calculate promised_date if not provided
+                if not promised_date and days_until_due is not None:
+                    promised_date = (datetime.utcnow() + timedelta(days=int(days_until_due))).date().isoformat()
+                
+                debtor_data = {
+                    'shopkeeper_id': shopkeeper_id,
+                    'name': name,
+                    'amount': float(amount) if amount else 0,
+                    'promised_date': promised_date,
+                    'phone_number': None,
+                    'is_paid': False
+                }
+                
+                result = supabase.table("debtors").insert(debtor_data).execute()
+                successful_inserts.append(entry)
+                
+            except Exception as e:
+                failed_inserts.append({"name": name, "reason": str(e)})
+        
+        elif action == "PAY":
+            try:
+                payment_amount = entry.get("amount")
+                
+                debtor_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").eq("is_paid", False).order("id", desc=False).limit(1).execute()
+                
+                if not debtor_query.data:
+                    send_whatsapp(sender_phone, f"❌ Lama helin deynta {name}.")
+                    failed_inserts.append({"name": name, "reason": "Debtor not found"})
+                    continue
+                
+                debtor = debtor_query.data[0]
+                current_balance = float(debtor["amount"])
+                
+                if payment_amount is None:
+                    updated = supabase.table("debtors").update({"is_paid": True}).eq("id", debtor["id"]).execute()
+                    send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay deyntii (${current_balance}).")
+                else:
+                    new_balance = current_balance - float(payment_amount)
+                    if new_balance <= 0:
+                        updated = supabase.table("debtors").update({"is_paid": True, "amount": 0}).eq("id", debtor["id"]).execute()
+                        send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay deyntii oo dhan.")
+                    else:
+                        updated = supabase.table("debtors").update({"amount": new_balance}).eq("id", debtor["id"]).execute()
+                        send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay ${payment_amount}. Haray: ${new_balance}")
+                    
+            except Exception as e:
+                send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
+                failed_inserts.append({"name": name, "reason": f"Payment error: {str(e)}"})
+        
+        elif action == "LIST":
+            try:
+                filter_date = entry.get("filter_date")
+                filter_type = entry.get("filter_type")
+                
+                # Build query
+                query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).eq("is_paid", False)
+                
+                # Apply date filter if exists
+                if filter_date:
+                    query = query.eq("promised_date", filter_date)
+                    if filter_type == "today":
+                        message_title = "📋 *Balamaha Maanta*"
+                    elif filter_type == "tomorrow":
+                        message_title = "📋 *Balamaha Berri*"
+                    else:
+                        message_title = f"📋 *Balamaha {filter_date}*"
+                else:
+                    query = query.order("promised_date", desc=False)
+                    # Check if user asked for due dates
+                    show_due_dates = any(keyword in message_text.lower() for keyword in ['balamaha', 'balamaha', 'balanta', 'ballanta', 'due'])
+                    if show_due_dates:
+                        message_title = "📋 *Liiska Deynta iyo Balamaha*"
+                    else:
+                        message_title = "📋 *Liiska Deynta*"
+                
+                debts_query = query.execute()
                 
                 if not debts_query.data:
-                    send_whatsapp(sender_phone, "✅ Ma hayo Deyn aan la bixin. All debts are paid!")
+                    if filter_date:
+                        send_whatsapp(sender_phone, f"✅ Ma jiraan deynta balamaheedu yahay {filter_date}.")
+                    else:
+                        send_whatsapp(sender_phone, "✅ Ma hayo Deyn aan la bixin. All debts are paid!")
                 else:
-                    # Check if user asked for due dates (balamaha/balamaha/balanta)
-                    show_due_dates = any(keyword in message_text.lower() for keyword in ['balamaha', 'balamaha', 'balanta', 'ballanta', 'due'])
+                    # Check if user asked for due dates
+                    show_due_dates = filter_date or any(keyword in message_text.lower() for keyword in ['balamaha', 'balamaha', 'balanta', 'ballanta', 'due'])
                     
                     debt_list = []
                     total = 0
@@ -239,10 +332,7 @@ async def whatsapp_webhook(request: Request):
                             debt_list.append(f"{i}. {debt['name']}: ${debt['amount']}")
                         total += debt['amount']
                     
-                    if show_due_dates:
-                        message = f"📋 *Liiska Deynta iyo Balamaha* ({len(debts_query.data)} debtor(s)):\n\n" + "\n".join(debt_list)
-                    else:
-                        message = f"📋 *Liiska Deynta* ({len(debts_query.data)} debtor(s)):\n\n" + "\n".join(debt_list)
+                    message = f"{message_title} ({len(debts_query.data)} debtor(s)):\n\n" + "\n".join(debt_list)
                     message += f"\n\n💰 **Total: ${total:.2f}**"
                     
                     send_whatsapp(sender_phone, message)
@@ -250,6 +340,34 @@ async def whatsapp_webhook(request: Request):
             except Exception as e:
                 send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
                 failed_inserts.append({"name": "LIST", "reason": f"List error: {str(e)}"})
+
+    # Send confirmation for ADD actions
+    if successful_inserts:
+        if len(successful_inserts) == 1:
+            entry = successful_inserts[0]
+            success_message = f"""✅ Deyntan waa la keydiyay!
+
+👤 Macmiilka: {entry['customer_name']}
+💵 Lacagta: ${entry['amount']}
+📅 Ballanta: {entry['promised_date']}"""
+        else:
+            success_message = f"""✅ Deymahan waa la keydiyay!
+
+"""
+            for entry in successful_inserts:
+                success_message += f"""👤 {entry['customer_name']}: ${entry['amount']} - {entry['promised_date']}
+"""
+        
+        send_whatsapp(sender_phone, success_message)
+
+    if failed_inserts:
+        error_message = f"❌ {len(failed_inserts)} deyntii ma keydsamin:\n"
+        for fail in failed_inserts:
+            error_message += f"- {fail['name']}: {fail['reason']}\n"
+        send_whatsapp(sender_phone, error_message)
+    
+    return {"status": "success"}
+  
     # Send confirmation for ADD actions
     if successful_inserts:
         if len(successful_inserts) == 1:
