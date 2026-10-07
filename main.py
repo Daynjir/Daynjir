@@ -246,13 +246,13 @@ async def whatsapp_webhook(request: Request):
     if successful_inserts:
         if len(successful_inserts) == 1:
             entry = successful_inserts[0]
-            success_message = f"""✅ Deyntii waa la keydiyay!
+            success_message = f"""✅ Deyntan waa la keydiyay!
 
 👤 Macmiilka: {entry['customer_name']}
 💵 Lacagta: ${entry['amount']}
 📅 Ballanta: {entry['promised_date']}"""
         else:
-            success_message = f"""✅ {len(successful_inserts)} deyntii waa la keydiyay!
+            success_message = f"""✅ Deymahan waa la keydiyay!
 
 """
             for entry in successful_inserts:
