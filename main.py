@@ -560,13 +560,13 @@ async def daily_digest():
         if not debt_records.data:
             continue
             
-        due_today = []
+              due_today = []
         for record in debt_records.data:
             if record["promised_date"] <= today:
                 due_today.append(f"• {record['name']}: ${record['amount']}")
 
-      @app.post("/webhook")
-async def whatsapp_webhook(request: Request):
+@app.post("/webhook")  # ← CORRECT: No indentation
+async def whatsapp_webhook(request: Request):  # ← CORRECT: No indentation
     data = await request.json()
     print(f"📥 RAW GREEN-API WEBHOOK PAYLOAD: {json.dumps(data)}")
     
