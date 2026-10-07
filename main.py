@@ -215,7 +215,7 @@ async def whatsapp_webhook(request: Request):
                 
                 if payment_amount is None:
                     updated = supabase.table("debtors").update({"is_paid": True}).eq("shopkeeper_id", shopkeeper_id).eq("name", debtor["name"]).eq("amount", debtor["amount"]).execute()
-                    send_whatsapp(sender_phone, f"✅ {name} wuxuu bixiyay deyntii (${current_balance}).")
+                    send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay deyntii (${current_balance}).")
                 else:
                     new_balance = current_balance - float(payment_amount)
                     if new_balance <= 0:
@@ -223,7 +223,7 @@ async def whatsapp_webhook(request: Request):
                         send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay deyntii oo dhan.")
                     else:
                         updated = supabase.table("debtors").update({"amount": new_balance}).eq("shopkeeper_id", shopkeeper_id).eq("name", debtor["name"]).eq("amount", debtor["amount"]).execute()
-                        send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay ${payment_amount}. baaqi: ${new_balance}")
+                        send_whatsapp(sender_phone, f"✅ {name} wuxuu bixiyay ${payment_amount}. baaqi: ${new_balance}")
                     
             except Exception as e:
                 send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
