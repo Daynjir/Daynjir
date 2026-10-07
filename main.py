@@ -17,8 +17,8 @@ app = FastAPI()
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-INSTANCE_ID = "710722757201"
-GREEN_API_TOKEN = "b3a2ccc5aa654185afdf4eaf22bd9c3a2b766efcc9d44ac1a3"
+INSTANCE_ID = "710722758620"
+GREEN_API_TOKEN = "feb8f9b99fa047a3b8b3442b303b6cbb8564a60129604f149c"
 GREEN_API_BASE = "https://7107.api.greenapi.com"
 
 SYSTEM_PROMPT = """You are Daynjir, a Somali debt management assistant for small shopkeepers. 
