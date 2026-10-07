@@ -162,9 +162,36 @@ for entry in entries:
         except Exception as e:
             failed_inserts.append({"name": name, "reason": str(e)})
     
-    elif action == "PAY":
-        # Your existing PAY logic here
-        pass
+       elif action == "PAY":
+        try:
+            payment_amount = parsed.get("amount")
+            
+            debtor_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").eq("is_paid", False).order("id", desc=False).limit(1).execute()
+            
+            if not debtor_query.data:
+                send_whatsapp(sender_phone, f"❌ Lama helin deynta {name}.")
+                return {"status": "debtor_not_found"}
+            
+            debtor = debtor_query.data[0]
+            current_balance = float(debtor["amount"])
+            
+            if payment_amount is None:
+                # Mark as fully paid
+                updated = supabase.table("debtors").update({"is_paid": True}).eq("id", debtor["id"]).execute()
+                send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay deyntii (${current_balance}).")
+            else:
+                # Partial payment
+                new_balance = current_balance - float(payment_amount)
+                if new_balance <= 0:
+                    updated = supabase.table("debtors").update({"is_paid": True, "amount": 0}).eq("id", debtor["id"]).execute()
+                    send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay deyntii oo dhan.")
+                else:
+                    updated = supabase.table("debtors").update({"amount": new_balance}).eq("id", debtor["id"]).execute()
+                    send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay ${payment_amount}. Haray: ${new_balance}")
+                    
+        except Exception as e:
+            send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
+            return {"status": "payment_failed"}
     
     elif action == "LIST":
         # Your existing LIST logic here
