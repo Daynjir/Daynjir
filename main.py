@@ -260,11 +260,11 @@ async def whatsapp_webhook(request: Request):
             except Exception as e:
                 failed_inserts.append({"name": name, "reason": str(e)})
         
-        elif action == "PAY":
+               elif action == "PAY":
             try:
                 payment_amount = entry.get("amount")
                 
-                debtor_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").eq("is_paid", False).order("id", desc=False).limit(1).execute()
+                debtor_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").eq("is_paid", False).order("promised_date", desc=False).limit(1).execute()
                 
                 if not debtor_query.data:
                     send_whatsapp(sender_phone, f"❌ Lama helin deynta {name}.")
@@ -275,15 +275,15 @@ async def whatsapp_webhook(request: Request):
                 current_balance = float(debtor["amount"])
                 
                 if payment_amount is None:
-                    updated = supabase.table("debtors").update({"is_paid": True}).eq("id", debtor["id"]).execute()
+                    updated = supabase.table("debtors").update({"is_paid": True}).eq("shopkeeper_id", shopkeeper_id).eq("name", debtor["name"]).eq("amount", debtor["amount"]).execute()
                     send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay deyntii (${current_balance}).")
                 else:
                     new_balance = current_balance - float(payment_amount)
                     if new_balance <= 0:
-                        updated = supabase.table("debtors").update({"is_paid": True, "amount": 0}).eq("id", debtor["id"]).execute()
+                        updated = supabase.table("debtors").update({"is_paid": True, "amount": 0}).eq("shopkeeper_id", shopkeeper_id).eq("name", debtor["name"]).eq("amount", debtor["amount"]).execute()
                         send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay deyntii oo dhan.")
                     else:
-                        updated = supabase.table("debtors").update({"amount": new_balance}).eq("id", debtor["id"]).execute()
+                        updated = supabase.table("debtors").update({"amount": new_balance}).eq("shopkeeper_id", shopkeeper_id).eq("name", debtor["name"]).eq("amount", debtor["amount"]).execute()
                         send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay ${payment_amount}. Haray: ${new_balance}")
                     
             except Exception as e:
