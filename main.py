@@ -129,14 +129,14 @@ async def whatsapp_webhook(request: Request):
         clean_json = re.search(r'\{.*\}', ai_response, re.DOTALL).group()
         parsed = json.loads(clean_json)
     except Exception:
-        send_whatsapp(sender_phone, "❌ Daynjir waa fahmi waayay qoraalkaaga. Fadlan u qor si cad.")
+        send_whatsapp(sender_phone, "❌ ma fahmin qoraalkaaga. Fadlan u qor si cad.")
         return {"status": "parsing_failed"}
 
     action = parsed.get("action", "ADD")
     name = parsed.get("customer_name")
     
     if not name and action != "LIST":
-        send_whatsapp(sender_phone, "❌ Magaca macmiilka si sax ah looma helin.")
+        send_whatsapp(sender_phone, "❌ Ma hayo Magaca macmiilka.")
         return {"status": "incomplete_data"}
 
     if action == "PAY":
@@ -154,7 +154,7 @@ async def whatsapp_webhook(request: Request):
             
             if payment_amount is None:
                 supabase.table("debtors").update({"amount": 0, "is_paid": True}).eq("id", debtor["id"]).execute()
-                send_whatsapp(sender_phone, f"✅ Deynta {name} oo dhan waa la bixiyay.")
+                send_whatsapp(sender_phone, f"✅ Daynta {name} oo dhan waa la bixiyay.")
                 return {"status": "success_paid_full"}
             
             payment_amount = float(payment_amount)
@@ -182,7 +182,7 @@ async def whatsapp_webhook(request: Request):
             debts_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).eq("is_paid", False).order("promised_date", desc=False).execute()
             
             if not debts_query.data:
-                send_whatsapp(sender_phone, "✅ Deyn la bixin lama hayo. All debts are paid!")
+                send_whatsapp(sender_phone, "✅ Ma hayo Deyn aan la bixin. All debts are paid!")
                 return {"status": "success_list_empty"}
             
             debt_list = []
