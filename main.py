@@ -26,30 +26,69 @@ Extract transaction intent from chaotic, unstructured Somali text into raw JSON.
 Do not include any conversational filler, markdown syntax, or backticks.
 
 Extract ALL debt entries from the message.
-For each entry, extract: customer_name, amount, promised_date (YYYY-MM-DD)
+For each entry, extract: customer_name, amount, promised_date (YYYY-MM-DD), phone_number
 
 ALWAYS return a JSON array, even for single entries.
 
 Response format (JSON array):
 [
-  {"action": "ADD" or "PAY" or "LIST", "customer_name": "string or null", "amount": number or null, "days_until_due": number or null, "customer_phone": "string or null", "promised_date": "YYYY-MM-DD or null", "filter_date": "YYYY-MM-DD or null", "filter_type": "today" or "tomorrow" or "date" or null}
+  {"action": "ADD" or "PAY" or "LIST" or "SEARCH" or "EDIT" or "DELETE" or "HISTORY" or "REPORT" or "EXPORT", "customer_name": "string or null", "amount": number or null, "days_until_due": number or null, "customer_phone": "string or null", "promised_date": "YYYY-MM-DD or null", "filter_date": "YYYY-MM-DD or null", "filter_type": "today" or "tomorrow" or "date" or "week" or "month" or null, "new_amount": number or null, "new_date": "YYYY-MM-DD or null", "new_phone": "string or null"}
 ]
 
-Examples:
-'Cali 20$ oo bari ah' -> [{"action": "ADD", "customer_name": "Cali", "amount": 20, "days_until_due": 1, "customer_phone": null, "promised_date": "2026-10-08", "filter_date": null, "filter_type": null}]
-'Cali $34 oct 8, Axmed $50 oct 9' -> [{"action": "ADD", "customer_name": "Cali", "amount": 34, "days_until_due": 1, "customer_phone": null, "promised_date": "2026-10-08", "filter_date": null, "filter_type": null}, {"action": "ADD", "customer_name": "Axmed", "amount": 50, "days_until_due": 2, "customer_phone": null, "promised_date": "2026-10-09", "filter_date": null, "filter_type": null}]
-'Xasan baa 15 doolar qaatay maanta' -> [{"action": "ADD", "customer_name": "Xasan", "amount": 15, "days_until_due": 0, "customer_phone": null, "promised_date": "2026-10-07", "filter_date": null, "filter_type": null}]
-'Cali wuu bixiyay' -> [{"action": "PAY", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null}]
-'Cali wuu bixiyay hantidii' -> [{"action": "PAY", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null}]
-'Gaawe wuxuu bixiyay $5' -> [{"action": "PAY", "customer_name": "Gaawe", "amount": 5, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null}]
-'Cali wuu bixiyay 10 doolar' -> [{"action": "PAY", "customer_name": "Cali", "amount": 10, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null}]
-'List my debts' -> [{"action": "LIST", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null}]
-'My debts' -> [{"action": "LIST", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null}]
-'Liiska deynta' -> [{"action": "LIST", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null}]
-'Balamaha maanta' -> [{"action": "LIST", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": "2026-10-07", "filter_type": "today"}]
-'Balamaha berri' -> [{"action": "LIST", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": "2026-10-08", "filter_type": "tomorrow"}]
-'Balamaha Oct 15' -> [{"action": "LIST", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": "2026-10-15", "filter_type": "date"}]
-'Balamaha 2026-10-15' -> [{"action": "LIST", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": "2026-10-15", "filter_type": "date"}]
+Examples - ADD:
+'Cali 20$ oo bari ah' -> [{"action": "ADD", "customer_name": "Cali", "amount": 20, "days_until_due": 1, "customer_phone": null, "promised_date": "2026-10-08", "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
+'Cali $34 oct 8, Axmed $50 oct 9' -> [{"action": "ADD", "customer_name": "Cali", "amount": 34, "days_until_due": 1, "customer_phone": null, "promised_date": "2026-10-08", "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}, {"action": "ADD", "customer_name": "Axmed", "amount": 50, "days_until_due": 2, "customer_phone": null, "promised_date": "2026-10-09", "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
+
+Examples - PAY:
+'Cali wuu bixiyay' -> [{"action": "PAY", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
+'Gaawe wuxuu bixiyay $5' -> [{"action": "PAY", "customer_name": "Gaawe", "amount": 5, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
+
+Examples - LIST:
+'Liiska deynta' -> [{"action": "LIST", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
+'Balamaha maanta' -> [{"action": "LIST", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": "2026-10-07", "filter_type": "today", "new_amount": null, "new_date": null, "new_phone": null}]
+'Balamaha Oct 15' -> [{"action": "LIST", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": "2026-10-15", "filter_type": "date", "new_amount": null, "new_date": null, "new_phone": null}]
+
+Examples - SEARCH:
+'Cali' (when Cali exists in debts) -> [{"action": "SEARCH", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
+'Show Cali debt' -> [{"action": "SEARCH", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
+
+Examples - EDIT:
+'edit Cali $50' -> [{"action": "EDIT", "customer_name": "Cali", "amount": 50, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": 50, "new_date": null, "new_phone": null}]
+'edit Cali oct 20' -> [{"action": "EDIT", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": "2026-10-20", "filter_date": null, "filter_type": null, "new_amount": null, "new_date": "2026-10-20", "new_phone": null}]
+'edit Cali $50 oct 20' -> [{"action": "EDIT", "customer_name": "Cali", "amount": 50, "days_until_due": null, "customer_phone": null, "promised_date": "2026-10-20", "filter_date": null, "filter_type": null, "new_amount": 50, "new_date": "2026-10-20", "new_phone": null}]
+
+Examples - DELETE:
+'delete Cali' -> [{"action": "DELETE", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
+'remove Cali' -> [{"action": "DELETE", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
+
+Examples - HISTORY:
+'Cali history' -> [{"action": "HISTORY", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
+'Cali taariikh' -> [{"action": "HISTORY", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
+
+Examples - REPORT:
+'Bishan report' -> [{"action": "REPORT", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": "month", "new_amount": null, "new_date": null, "new_phone": null}]
+'Todobaadkan report' -> [{"action": "REPORT", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": "week", "new_amount": null, "new_date": null, "new_phone": null}]
+'Weekly report' -> [{"action": "REPORT", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": "week", "new_amount": null, "new_date": null, "new_phone": null}]
+'Monthly report' -> [{"action": "REPORT", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": "month", "new_amount": null, "new_date": null, "new_phone": null}]
+
+Examples - EXPORT:
+'Export' -> [{"action": "EXPORT", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
+'Download debts' -> [{"action": "EXPORT", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
+
+Examples - PHONE:
+'Cali 615123456' -> [{"action": "ADD", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": "615123456", "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": "615123456"}]
+'Save Cali phone 615123456' -> [{"action": "ADD", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": "615123456", "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": "615123456"}]
+
+Also support English:
+'Add debt' = ADD action
+'List debts' = LIST action
+'Pay' = PAY action
+'Search' = SEARCH action
+'Edit' = EDIT action
+'Delete' = DELETE action
+'History' = HISTORY action
+'Report' = REPORT action
+'Export' = EXPORT action
 """
 
 
@@ -169,9 +208,15 @@ async def whatsapp_webhook(request: Request):
         amount = entry.get("amount")
         promised_date = entry.get("promised_date")
         days_until_due = entry.get("days_until_due")
+        customer_phone = entry.get("customer_phone")
+        new_amount = entry.get("new_amount")
+        new_date = entry.get("new_date")
+        new_phone = entry.get("new_phone")
+        filter_date = entry.get("filter_date")
+        filter_type = entry.get("filter_type")
         
-        # Validate name
-        if not name and action != "LIST":
+        # Validate name for actions that need it
+        if not name and action not in ["LIST", "REPORT", "EXPORT"]:
             failed_inserts.append({"name": "Unknown", "reason": "No name"})
             continue
         
@@ -184,12 +229,25 @@ async def whatsapp_webhook(request: Request):
                     # Default to today if no date provided
                     promised_date = datetime.utcnow().date().isoformat()
                 
+                # Handle phone number save
+                if new_phone and not amount:
+                    # Just saving phone number
+                    debtor_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").eq("is_paid", False).limit(1).execute()
+                    if debtor_query.data:
+                        updated = supabase.table("debtors").update({"phone_number": new_phone}).eq("shopkeeper_id", shopkeeper_id).eq("name", debtor_query.data[0]["name"]).execute()
+                        send_whatsapp(sender_phone, f"✅ {name} phone number saved: {new_phone}")
+                        successful_inserts.append(entry)
+                        continue
+                    else:
+                        failed_inserts.append({"name": name, "reason": "Debtor not found for phone update"})
+                        continue
+                
                 debtor_data = {
                     'shopkeeper_id': shopkeeper_id,
                     'name': name,
                     'amount': float(amount) if amount else 0,
                     'promised_date': promised_date,
-                    'phone_number': None,
+                    'phone_number': new_phone if new_phone else None,
                     'is_paid': False
                 }
                 
@@ -223,7 +281,7 @@ async def whatsapp_webhook(request: Request):
                         send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay deyntii oo dhan.")
                     else:
                         updated = supabase.table("debtors").update({"amount": new_balance}).eq("shopkeeper_id", shopkeeper_id).eq("name", debtor["name"]).eq("amount", debtor["amount"]).execute()
-                        send_whatsapp(sender_phone, f"✅ {name} wuxuu bixiyay ${payment_amount}. baaqi: ${new_balance}")
+                        send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay ${payment_amount}. Haray: ${new_balance}")
                     
             except Exception as e:
                 send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
@@ -231,9 +289,6 @@ async def whatsapp_webhook(request: Request):
         
         elif action == "LIST":
             try:
-                filter_date = entry.get("filter_date")
-                filter_type = entry.get("filter_type")
-                
                 # Build query
                 query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).eq("is_paid", False)
                 
@@ -283,25 +338,205 @@ async def whatsapp_webhook(request: Request):
             except Exception as e:
                 send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
                 failed_inserts.append({"name": "LIST", "reason": f"List error: {str(e)}"})
+        
+        elif action == "SEARCH":
+            try:
+                # Search for debtor by name
+                debts_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").eq("is_paid", False).execute()
+                
+                if not debts_query.data:
+                    send_whatsapp(sender_phone, f"❌ Lama helin {name}.")
+                else:
+                    debt_list = []
+                    total = 0
+                    for i, debt in enumerate(debts_query.data, 1):
+                        debt_list.append(f"{i}. {debt['name']}: ${debt['amount']} - Due: {debt['promised_date']}")
+                        if debt.get('phone_number'):
+                            debt_list[-1] += f" 📞 {debt['phone_number']}"
+                        total += debt['amount']
+                    
+                    message = f"🔍 *Search Results for {name}* ({len(debts_query.data)} found):\n\n" + "\n".join(debt_list)
+                    message += f"\n\n💰 **Total: ${total:.2f}**"
+                    
+                    send_whatsapp(sender_phone, message)
+                    
+            except Exception as e:
+                send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
+                failed_inserts.append({"name": name, "reason": f"Search error: {str(e)}"})
+        
+        elif action == "EDIT":
+            try:
+                # Find debtor
+                debtor_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").eq("is_paid", False).limit(1).execute()
+                
+                if not debtor_query.data:
+                    send_whatsapp(sender_phone, f"❌ Lama helin {name}.")
+                    failed_inserts.append({"name": name, "reason": "Debtor not found"})
+                    continue
+                
+                debtor = debtor_query.data[0]
+                
+                # Build update data
+                update_data = {}
+                if new_amount is not None:
+                    update_data['amount'] = float(new_amount)
+                if new_date is not None:
+                    update_data['promised_date'] = new_date
+                
+                if not update_data:
+                    send_whatsapp(sender_phone, "❌ No changes specified. Use: edit [Name] $[Amount] [Date]")
+                    failed_inserts.append({"name": name, "reason": "No changes"})
+                    continue
+                
+                # Update
+                updated = supabase.table("debtors").update(update_data).eq("shopkeeper_id", shopkeeper_id).eq("name", debtor["name"]).eq("amount", debtor["amount"]).execute()
+                
+                changes = []
+                if 'amount' in update_data:
+                    changes.append(f"Amount: ${debtor['amount']} → ${update_data['amount']}")
+                if 'promised_date' in update_data:
+                    changes.append(f"Date: {debtor['promised_date']} → {update_data['promised_date']}")
+                
+                send_whatsapp(sender_phone, f"✅ {name} updated:\n" + "\n".join(changes))
+                successful_inserts.append(entry)
+                    
+            except Exception as e:
+                send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
+                failed_inserts.append({"name": name, "reason": f"Edit error: {str(e)}"})
+        
+        elif action == "DELETE":
+            try:
+                # Find debtor
+                debtor_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").eq("is_paid", False).limit(1).execute()
+                
+                if not debtor_query.data:
+                    send_whatsapp(sender_phone, f"❌ Lama helin {name}.")
+                    failed_inserts.append({"name": name, "reason": "Debtor not found"})
+                    continue
+                
+                debtor = debtor_query.data[0]
+                
+                # Delete
+                deleted = supabase.table("debtors").delete().eq("shopkeeper_id", shopkeeper_id).eq("name", debtor["name"]).eq("amount", debtor["amount"]).execute()
+                
+                send_whatsapp(sender_phone, f"✅ {name} (${debtor['amount']}) has been deleted.")
+                successful_inserts.append(entry)
+                    
+            except Exception as e:
+                send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
+                failed_inserts.append({"name": name, "reason": f"Delete error: {str(e)}"})
+        
+        elif action == "HISTORY":
+            try:
+                # Get all debts (paid + unpaid) for this person
+                debts_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").order("created_at", desc=True).execute()
+                
+                if not debts_query.data:
+                    send_whatsapp(sender_phone, f"❌ No history found for {name}.")
+                else:
+                    history_list = []
+                    for i, debt in enumerate(debts_query.data, 1):
+                        status = "✅ PAID" if debt['is_paid'] else "⏳ UNPAID"
+                        history_list.append(f"{i}. {debt['name']}: ${debt['amount']} - {debt['promised_date']} [{status}]")
+                    
+                    message = f"📜 *History for {name}* ({len(debts_query.data)} records):\n\n" + "\n".join(history_list)
+                    
+                    send_whatsapp(sender_phone, message)
+                    
+            except Exception as e:
+                send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
+                failed_inserts.append({"name": name, "reason": f"History error: {str(e)}"})
+        
+        elif action == "REPORT":
+            try:
+                # Get all debts
+                all_debts = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).execute()
+                
+                if not all_debts.data:
+                    send_whatsapp(sender_phone, "✅ No debts found.")
+                else:
+                    total_added = sum(d['amount'] for d in all_debts.data)
+                    paid_debts = [d for d in all_debts.data if d['is_paid']]
+                    unpaid_debts = [d for d in all_debts.data if not d['is_paid']]
+                    total_paid = sum(d['amount'] for d in paid_debts)
+                    total_unpaid = sum(d['amount'] for d in unpaid_debts)
+                    
+                    if filter_type == "week":
+                        title = "📊 *Weekly Report*"
+                    elif filter_type == "month":
+                        title = "📊 *Monthly Report*"
+                    else:
+                        title = "📊 *Full Report*"
+                    
+                    message = f"""{title}
+
+💰 **Total Added:** ${total_added:.2f}
+✅ **Total Paid:** ${total_paid:.2f}
+⏳ **Total Unpaid:** ${total_unpaid:.2f}
+
+📈 **Collection Rate:** {(total_paid/total_added*100) if total_added > 0 else 0:.1f}%
+
+👥 **Debtors:** {len(all_debts.data)}
+   - Paid: {len(paid_debts)}
+   - Unpaid: {len(unpaid_debts)}"""
+                    
+                    send_whatsapp(sender_phone, message)
+                    
+            except Exception as e:
+                send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
+                failed_inserts.append({"name": "REPORT", "reason": f"Report error: {str(e)}"})
+        
+        elif action == "EXPORT":
+            try:
+                # Get all debts
+                all_debts = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).order("promised_date", desc=False).execute()
+                
+                if not all_debts.data:
+                    send_whatsapp(sender_phone, "✅ No debts to export.")
+                else:
+                    # Format as CSV-like text
+                    export_text = "NAME,AMOUNT,DUE DATE,PHONE,STATUS\n"
+                    for debt in all_debts.data:
+                        status = "PAID" if debt['is_paid'] else "UNPAID"
+                        phone = debt.get('phone_number') or ""
+                        export_text += f"{debt['name']},{debt['amount']},{debt['promised_date']},{phone},{status}\n"
+                    
+                    # Split into chunks (WhatsApp message limit)
+                    chunks = [export_text[i:i+1000] for i in range(0, len(export_text), 1000)]
+                    
+                    send_whatsapp(sender_phone, f"📥 **EXPORT DATA** ({len(all_debts.data)} debts):\n\n(Copy this to Excel/Sheets)\n\n")
+                    for chunk in chunks:
+                        send_whatsapp(sender_phone, f"```\n{chunk}\n```")
+                    
+                    send_whatsapp(sender_phone, f"\n✅ Export complete! Copy the data above and paste into Excel or Google Sheets.")
+                    
+            except Exception as e:
+                send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
+                failed_inserts.append({"name": "EXPORT", "reason": f"Export error: {str(e)}"})
 
     # Send confirmation for ADD actions
     if successful_inserts:
-        if len(successful_inserts) == 1:
-            entry = successful_inserts[0]
-            success_message = f"""✅ Deyntan waa la keydiyay!
+        add_entries = [e for e in successful_inserts if e.get('action') == 'ADD']
+        if add_entries:
+            if len(add_entries) == 1:
+                entry = add_entries[0]
+                if entry.get('customer_phone'):
+                    success_message = f"✅ Phone saved for {entry['customer_name']}: {entry['customer_phone']}"
+                else:
+                    success_message = f"""✅ Deyntan waa la keydiyay!
 
 👤 Macmiilka: {entry['customer_name']}
 💵 Lacagta: ${entry['amount']}
 📅 Ballanta: {entry['promised_date']}"""
-        else:
-            success_message = f"""✅ Deymahan waa la keydiyay!
+            else:
+                success_message = f"""✅ Deymahan waa la keydiyay!
 
 """
-            for entry in successful_inserts:
-                success_message += f"""👤 {entry['customer_name']}: ${entry['amount']} - {entry['promised_date']}
+                for entry in add_entries:
+                    success_message += f"""👤 {entry['customer_name']}: ${entry['amount']} - {entry['promised_date']}
 """
-        
-        send_whatsapp(sender_phone, success_message)
+            
+            send_whatsapp(sender_phone, success_message)
 
     if failed_inserts:
         error_message = f"❌ {len(failed_inserts)} deyntii ma keydsamin:\n"
