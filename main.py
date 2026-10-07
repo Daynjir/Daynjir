@@ -55,7 +55,6 @@ def send_whatsapp(to_phone: str, message: str):
         print(f"📡 Green-API Status: {res.status_code} - Response: {res.text}")
     except Exception as e:
         print(f"❌ Error sending WhatsApp: {e}")
-
 @app.get("/")
 def home():
     return {"status": "Daynjir Bot Engine is running live."}
@@ -63,7 +62,7 @@ def home():
 @app.post("/webhook")
 async def whatsapp_webhook(request: Request):
     data = await request.json()
-    print(f"📥 RAW GREEN-API PAYHOOK PAYLOAD: {json.dumps(data)}")
+    print(f"📥 RAW GREEN-API WEBHOOK PAYLOAD: {json.dumps(data)}")
     
     allowed_types = ["incomingMessageReceived", "outgoingMessageReceived"]
     if data.get("typeWebhook") not in allowed_types:
@@ -94,6 +93,7 @@ async def whatsapp_webhook(request: Request):
     if not message_text:
         return {"status": "empty_text"}
     
+    # Get or create shopkeeper
     try:
         sk_query = supabase.table("shopkeepers").select("*").eq("phone_number", sender_phone).execute()
         if not sk_query.data:
@@ -110,7 +110,7 @@ async def whatsapp_webhook(request: Request):
 
     chat_completion = groq_client.chat.completions.create(
         messages=[{"role": "system", "content": dynamic_system_prompt}, {"role": "user", "content": message_text}],
-        model="openai/gpt-oss-20b",
+        model="llama-3.1-8b-instant",
         temperature=0.0
     )
     
@@ -261,3 +261,4 @@ async def daily_digest():
             send_whatsapp(sk_phone, msg)
             
     return {"status": "done"}
+@
