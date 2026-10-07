@@ -14,8 +14,8 @@ load_dotenv()
 app = FastAPI()
 
 # Securely load credentials from Render's Environment panel variables
-supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
-groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+supabase: Client = create_client(os.getenv("https://eykvkchadrdqskfhpkcg.supabase.co"), os.getenv("sb_publishable_ydmpcYgVnHkbnFld6TXbxg_uaL2Gkej"))
+groq_client = Groq(api_key=os.getenv("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"))
 
 INSTANCE_ID = "710722758620"
 GREEN_API_TOKEN = "feb8f9b99fa047a3b8b3442b303b6cbb8564a60129604f149c"
@@ -46,6 +46,7 @@ Examples:
 'Liiska deynta' -> [{"action": "LIST", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null}]
 """
 
+
 def send_whatsapp(to_phone: str, message: str):
     clean_phone = str(to_phone).lstrip("+").split("@")[0].strip()
     url = "https://7107.api.greenapi.com/waInstance710722758620/sendMessage/feb8f9b99fa047a3b8b3442b303b6cbb8564a60129604f149c"
@@ -60,9 +61,12 @@ def send_whatsapp(to_phone: str, message: str):
         print(f"📡 Green-API Status: {res.status_code} - Response: {res.text}")
     except Exception as e:
         print(f"❌ Error sending WhatsApp: {e}")
+
+
 @app.get("/")
 def home():
     return {"status": "Daynjir Bot Engine is running live."}
+
 
 @app.post("/webhook")
 async def whatsapp_webhook(request: Request):
@@ -120,193 +124,151 @@ async def whatsapp_webhook(request: Request):
     )
     
     try:
-        if isinstance(chat_completion, list):
-            ai_response = chat_completion.get("message", {}).get("content", "").strip()
-        else:
-            ai_response = chat_completion.choices[0].message.content.strip()
+        ai_response = chat_completion.choices[0].message.content.strip()
     except Exception as parse_err:
         print(f"⚠️ Direct extraction failed, casting raw string: {parse_err}")
         ai_response = str(chat_completion).strip()
         
     print(f"🤖 Groq AI Processed Output: {ai_response}")
     
-   # Process each entry
-successful_inserts = []
-failed_inserts = []
+    # Parse JSON response
+    try:
+        json_match = re.search(r'[\[{].*[\]}]', ai_response, re.DOTALL)
+        if not json_match:
+            raise Exception("No JSON found")
+        
+        clean_json = json_match.group()
+        parsed = json.loads(clean_json)
+        
+        # Ensure it's always a list
+        if isinstance(parsed, dict):
+            entries = [parsed]
+        else:
+            entries = parsed
+        
+        if not entries:
+            raise Exception("Empty entries")
+            
+    except Exception as e:
+        send_whatsapp(sender_phone, "❌ ma fahmin qoraalkaaga. Fadlan u qor si cad.")
+        return {"status": "parsing_failed"}
 
-for entry in entries:
-    action = entry.get("action", "ADD")
-    name = entry.get("customer_name")
-    amount = entry.get("amount")
-    promised_date = entry.get("promised_date")
-    
-    # Validate name
-    if not name and action != "LIST":
-        failed_inserts.append({"name": "Unknown", "reason": "No name"})
-        continue
-    
-    if action == "ADD":
-        try:
-            debtor_data = {
-                'shopkeeper_id': shopkeeper_id,
-                'name': name,
-                'amount': float(amount) if amount else 0,
-                'promised_date': promised_date,
-                'phone_number': None,
-                'is_paid': False
-            }
-            
-            result = supabase.table("debtors").insert(debtor_data).execute()
-            successful_inserts.append(entry)
-            
-        except Exception as e:
-            failed_inserts.append({"name": name, "reason": str(e)})
-    
-       elif action == "PAY":
-        try:
-            payment_amount = parsed.get("amount")
-            
-            debtor_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").eq("is_paid", False).order("id", desc=False).limit(1).execute()
-            
-            if not debtor_query.data:
-                send_whatsapp(sender_phone, f"❌ Lama helin deynta {name}.")
-                return {"status": "debtor_not_found"}
-            
-            debtor = debtor_query.data[0]
-            current_balance = float(debtor["amount"])
-            
-            if payment_amount is None:
-                # Mark as fully paid
-                updated = supabase.table("debtors").update({"is_paid": True}).eq("id", debtor["id"]).execute()
-                send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay deyntii (${current_balance}).")
-            else:
-                # Partial payment
-                new_balance = current_balance - float(payment_amount)
-                if new_balance <= 0:
-                    updated = supabase.table("debtors").update({"is_paid": True, "amount": 0}).eq("id", debtor["id"]).execute()
-                    send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay deyntii oo dhan.")
+    # Process each entry
+    successful_inserts = []
+    failed_inserts = []
+
+    for entry in entries:
+        action = entry.get("action", "ADD")
+        name = entry.get("customer_name")
+        amount = entry.get("amount")
+        promised_date = entry.get("promised_date")
+        days_until_due = entry.get("days_until_due")
+        
+        # Validate name
+        if not name and action != "LIST":
+            failed_inserts.append({"name": "Unknown", "reason": "No name"})
+            continue
+        
+        if action == "ADD":
+            try:
+                # Calculate promised_date if not provided
+                if not promised_date and days_until_due is not None:
+                    promised_date = (datetime.utcnow() + timedelta(days=int(days_until_due))).date().isoformat()
+                
+                debtor_data = {
+                    'shopkeeper_id': shopkeeper_id,
+                    'name': name,
+                    'amount': float(amount) if amount else 0,
+                    'promised_date': promised_date,
+                    'phone_number': None,
+                    'is_paid': False
+                }
+                
+                result = supabase.table("debtors").insert(debtor_data).execute()
+                successful_inserts.append(entry)
+                
+            except Exception as e:
+                failed_inserts.append({"name": name, "reason": str(e)})
+        
+        elif action == "PAY":
+            try:
+                payment_amount = entry.get("amount")
+                
+                debtor_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").eq("is_paid", False).order("id", desc=False).limit(1).execute()
+                
+                if not debtor_query.data:
+                    send_whatsapp(sender_phone, f"❌ Lama helin deynta {name}.")
+                    failed_inserts.append({"name": name, "reason": "Debtor not found"})
+                    continue
+                
+                debtor = debtor_query.data[0]
+                current_balance = float(debtor["amount"])
+                
+                if payment_amount is None:
+                    updated = supabase.table("debtors").update({"is_paid": True}).eq("id", debtor["id"]).execute()
+                    send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay deyntii (${current_balance}).")
                 else:
-                    updated = supabase.table("debtors").update({"amount": new_balance}).eq("id", debtor["id"]).execute()
-                    send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay ${payment_amount}. Haray: ${new_balance}")
+                    new_balance = current_balance - float(payment_amount)
+                    if new_balance <= 0:
+                        updated = supabase.table("debtors").update({"is_paid": True, "amount": 0}).eq("id", debtor["id"]).execute()
+                        send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay deyntii oo dhan.")
+                    else:
+                        updated = supabase.table("debtors").update({"amount": new_balance}).eq("id", debtor["id"]).execute()
+                        send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay ${payment_amount}. Haray: ${new_balance}")
                     
-        except Exception as e:
-            send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
-            return {"status": "payment_failed"}
-    
-    elif action == "LIST":
-        # Your existing LIST logic here
-        pass
+            except Exception as e:
+                send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
+                failed_inserts.append({"name": name, "reason": f"Payment error: {str(e)}"})
+        
+        elif action == "LIST":
+            try:
+                debts_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).eq("is_paid", False).order("promised_date", desc=False).execute()
+                
+                if not debts_query.data:
+                    send_whatsapp(sender_phone, "✅ Ma hayo Deyn aan la bixin. All debts are paid!")
+                else:
+                    debt_list = []
+                    total = 0
+                    for i, debt in enumerate(debts_query.data, 1):
+                        debt_list.append(f"{i}. {debt['name']}: ${debt['amount']} (Due: {debt['promised_date']})")
+                        total += debt['amount']
+                    
+                    message = f"📋 *Liiska Deynta* ({len(debts_query.data)} debtor(s)):\n\n" + "\n".join(debt_list)
+                    message += f"\n\n💰 **Total: ${total:.2f}**"
+                    
+                    send_whatsapp(sender_phone, message)
+                    
+            except Exception as e:
+                send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
+                failed_inserts.append({"name": "LIST", "reason": f"List error: {str(e)}"})
 
-# Send confirmation
-if successful_inserts:
-    if len(successful_inserts) == 1:
-        entry = successful_inserts[0]
-        success_message = f"""✅ Deyntii waa la keydiyay!
+    # Send confirmation for ADD actions
+    if successful_inserts:
+        if len(successful_inserts) == 1:
+            entry = successful_inserts[0]
+            success_message = f"""✅ Deyntii waa la keydiyay!
 
 👤 Macmiilka: {entry['customer_name']}
 💵 Lacagta: ${entry['amount']}
 📅 Ballanta: {entry['promised_date']}"""
-    else:
-        success_message = f"""✅ {len(successful_inserts)} deyntii waa la keydiyay!
-
-"""
-        for entry in successful_inserts:
-            success_message += f"""👤 {entry['customer_name']}: ${entry['amount']} - {entry['promised_date']}
-"""
-    
-    send_whatsapp(sender_phone, success_message)
-
-if failed_inserts:
-    error_message = f"❌ {len(failed_inserts)} deyntii ma keydsamin:\n"
-    for fail in failed_inserts:
-        error_message += f"- {fail['name']}: {fail['reason']}\n"
-    send_whatsapp(sender_phone, error_message)
-            
-            if payment_amount is None:
-                supabase.table("debtors").update({"amount": 0, "is_paid": True}).eq("id", debtor["id"]).execute()
-                send_whatsapp(sender_phone, f"✅ Daynta {name} oo dhan waa la bixiyay.")
-                return {"status": "success_paid_full"}
-            
-            payment_amount = float(payment_amount)
-            
-            if payment_amount <= 0:
-                send_whatsapp(sender_phone, "❌ Lacagta bixinta waa inay ka weynaataa eber.")
-                return {"status": "invalid_payment_amount"}
-            
-            remaining_balance = current_balance - payment_amount
-            
-            if remaining_balance <= 0:
-                supabase.table("debtors").update({"amount": 0, "is_paid": True}).eq("id", debtor["id"]).execute()
-                send_whatsapp(sender_phone, f"✅ {name} wuxuu bixiyay ${payment_amount:.2f}. Deyntii oo dhan waa la bixiyay.")
-            else:
-                supabase.table("debtors").update({"amount": round(remaining_balance, 2)}).eq("id", debtor["id"]).execute()
-                send_whatsapp(sender_phone, f"✅ {name} wuxuu bixiyay ${payment_amount:.2f}. Haraaga: ${remaining_balance:.2f}")
-            
-            return {"status": "success_partial_payment"}
-        except Exception as pay_err:
-            print(f"❌ DATABASE ERROR (Update Pay Status): {pay_err}")
-            return {"status": "pay_db_error"}
-
-    if action == "LIST":
-        try:
-            debts_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).eq("is_paid", False).order("promised_date", desc=False).execute()
-            
-            if not debts_query.data:
-                send_whatsapp(sender_phone, "✅ Ma hayo Deyn aan la bixin. All debts are paid!")
-                return {"status": "success_list_empty"}
-            
-            debt_list = []
-            total = 0
-            for i, debt in enumerate(debts_query.data, 1):
-                debt_list.append(f"{i}. {debt['name']}: ${debt['amount']} (Due: {debt['promised_date']})")
-                total += debt['amount']
-            
-            message = f"📋 *Liiska Deynta* ({len(debts_query.data)} debtor(s)):\n\n" + "\n".join(debt_list)
-            message += f"\n\n💰 **Total: ${total:.2f}**"
-            
-            send_whatsapp(sender_phone, message)
-            return {"status": "success_list"}
-        except Exception as list_err:
-            print(f"❌ DATABASE ERROR (List Debts): {list_err}")
-            return {"status": "list_db_error"}
-
-    amount = parsed.get("amount")
-    days = parsed.get("days_until_due")
-    debtor_phone = parsed.get("customer_phone")
-
-    if not amount:
-        send_whatsapp(sender_phone, "❌ Fadlan u qor lacagta deynta si sax ah.")
-        return {"status": "incomplete_amount"}
-
-    try:
-        if days is None or str(days).strip() == "" or str(days).lower() == "null":
-            days_offset = 0
         else:
-            days_offset = int(days)
-    except Exception:
-        days_offset = 0
+            success_message = f"""✅ {len(successful_inserts)} deyntii waa la keydiyay!
 
-    promised_date = (datetime.utcnow() + timedelta(days=days_offset)).date().isoformat()
+"""
+            for entry in successful_inserts:
+                success_message += f"""👤 {entry['customer_name']}: ${entry['amount']} - {entry['promised_date']}
+"""
+        
+        send_whatsapp(sender_phone, success_message)
 
-    try:
-        insert_payload = {
-            "shopkeeper_id": int(shopkeeper_id),
-            "name": str(name),
-            "amount": float(amount),
-            "promised_date": promised_date,
-            "phone_number": str(debtor_phone) if debtor_phone else None,
-            "is_paid": False
-        }
-        print(f"⚙️ Attempting Supabase Insert Payload: {insert_payload}")
-        
-        db_res = supabase.table("debtors").insert(insert_payload).execute()
-        print(f"✅ Supabase Database Response Data: {db_res.data}")
-        
-        send_whatsapp(sender_phone, f"✅ *Dayntan waan Kaydiyay!*\n\n👤 Macmiilka: {name}\n💵 Lacagta: ${amount}\n📅 Ballanta: {promised_date}")
-        return {"status": "success_add"}
-    except Exception as insert_err:
-        print(f"❌ DATABASE ERROR (Debtors Insertion Failure): {insert_err}")
-        return {"status": "debtor_insert_db_error"}
+    if failed_inserts:
+        error_message = f"❌ {len(failed_inserts)} deyntii ma keydsamin:\n"
+        for fail in failed_inserts:
+            error_message += f"- {fail['name']}: {fail['reason']}\n"
+        send_whatsapp(sender_phone, error_message)
+    
+    return {"status": "success"}
+
 
 @app.get("/cron/daily-digest")
 async def daily_digest():
@@ -327,7 +289,13 @@ async def daily_digest():
                 due_today.append(f"• {record['name']}: ${record['amount']}")
         
         if due_today:
-            msg = "☀️ *Xasuusinta Maalinle ah ee Daynjir* ☀️\n\n*Kuwa maanta laga filayo ama dhaafay:*\n" + "\n".join(due_today)
+            msg = "☀️ *Xasuusinta Maalinle ah ee Daynjir* ☀️\n\n*Balamaha maanta & kuwa dhaafay:*\n" + "\n".join(due_today)
             send_whatsapp(sk_phone, msg)
             
     return {"status": "done"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
