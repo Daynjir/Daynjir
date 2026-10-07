@@ -205,7 +205,7 @@ async def whatsapp_webhook(request: Request):
     debtor_phone = parsed.get("customer_phone")
 
     if not amount:
-        send_whatsapp(sender_phone, "❌ Fadlan qor lacagta deynta si sax ah.")
+        send_whatsapp(sender_phone, "❌ Fadlan u qor lacagta deynta si sax ah.")
         return {"status": "incomplete_amount"}
 
     try:
@@ -232,7 +232,7 @@ async def whatsapp_webhook(request: Request):
         db_res = supabase.table("debtors").insert(insert_payload).execute()
         print(f"✅ Supabase Database Response Data: {db_res.data}")
         
-        send_whatsapp(sender_phone, f"✅ *Deyntii waa la keydiyay!*\n\n👤 Macmiilka: {name}\n💵 Lacagta: ${amount}\n📅 Ballanta: {promised_date}")
+        send_whatsapp(sender_phone, f"✅ *Dayntan waan Kaydiyay!*\n\n👤 Macmiilka: {name}\n💵 Lacagta: ${amount}\n📅 Ballanta: {promised_date}")
         return {"status": "success_add"}
     except Exception as insert_err:
         print(f"❌ DATABASE ERROR (Debtors Insertion Failure): {insert_err}")
