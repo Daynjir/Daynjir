@@ -157,7 +157,7 @@ async def whatsapp_webhook(request: Request):
         send_whatsapp(sender_phone, "❌ ma fahmin qoraalkaaga. Fadlan u qor si cad.")
         return {"status": "parsing_failed"}
 
-    # Process each entry
+       # Process each entry
     successful_inserts = []
     failed_inserts = []
 
@@ -173,7 +173,7 @@ async def whatsapp_webhook(request: Request):
             failed_inserts.append({"name": "Unknown", "reason": "No name"})
             continue
         
-               if action == "ADD":
+        if action == "ADD":
             try:
                 # Calculate promised_date if not provided
                 if not promised_date and days_until_due is not None:
@@ -226,6 +226,88 @@ async def whatsapp_webhook(request: Request):
             except Exception as e:
                 send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
                 failed_inserts.append({"name": name, "reason": f"Payment error: {str(e)}"})
+        
+        elif action == "LIST":
+            try:
+                filter_date = entry.get("filter_date")
+                filter_type = entry.get("filter_type")
+                
+                # Build query
+                query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).eq("is_paid", False)
+                
+                # Apply date filter if exists
+                if filter_date:
+                    query = query.eq("promised_date", filter_date)
+                    if filter_type == "today":
+                        message_title = "📋 *Balamaha Maanta*"
+                    elif filter_type == "tomorrow":
+                        message_title = "📋 *Balamaha Berri*"
+                    else:
+                        message_title = f"📋 *Balamaha {filter_date}*"
+                else:
+                    query = query.order("promised_date", desc=False)
+                    # Check if user asked for due dates
+                    show_due_dates = any(keyword in message_text.lower() for keyword in ['balamaha', 'balamaha', 'balanta', 'ballanta', 'due'])
+                    if show_due_dates:
+                        message_title = "📋 *Liiska Deynta iyo Balamaha*"
+                    else:
+                        message_title = "📋 *Liiska Deynta*"
+                
+                debts_query = query.execute()
+                
+                if not debts_query.data:
+                    if filter_date:
+                        send_whatsapp(sender_phone, f"✅ Ma jiraan deynta balamaheedu yahay {filter_date}.")
+                    else:
+                        send_whatsapp(sender_phone, "✅ Ma hayo Deyn aan la bixin. All debts are paid!")
+                else:
+                    # Check if user asked for due dates
+                    show_due_dates = filter_date or any(keyword in message_text.lower() for keyword in ['balamaha', 'balamaha', 'balanta', 'ballanta', 'due'])
+                    
+                    debt_list = []
+                    total = 0
+                    for i, debt in enumerate(debts_query.data, 1):
+                        if show_due_dates:
+                            debt_list.append(f"{i}. {debt['name']}: ${debt['amount']} - {debt['promised_date']}")
+                        else:
+                            debt_list.append(f"{i}. {debt['name']}: ${debt['amount']}")
+                        total += debt['amount']
+                    
+                    message = f"{message_title} ({len(debts_query.data)} debtor(s)):\n\n" + "\n".join(debt_list)
+                    message += f"\n\n💰 **Total: ${total:.2f}**"
+                    
+                    send_whatsapp(sender_phone, message)
+                    
+            except Exception as e:
+                send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
+                failed_inserts.append({"name": "LIST", "reason": f"List error: {str(e)}"})
+
+    # Send confirmation for ADD actions
+    if successful_inserts:
+        if len(successful_inserts) == 1:
+            entry = successful_inserts[0]
+            success_message = f"""✅ Deyntan waa la keydiyay!
+
+👤 Macmiilka: {entry['customer_name']}
+💵 Lacagta: ${entry['amount']}
+📅 Ballanta: {entry['promised_date']}"""
+        else:
+            success_message = f"""✅ Deymahan waa la keydiyay!
+
+"""
+            for entry in successful_inserts:
+                success_message += f"""👤 {entry['customer_name']}: ${entry['amount']} - {entry['promised_date']}
+"""
+        
+        send_whatsapp(sender_phone, success_message)
+
+    if failed_inserts:
+        error_message = f"❌ {len(failed_inserts)} deyntii ma keydsamin:\n"
+        for fail in failed_inserts:
+            error_message += f"- {fail['name']}: {fail['reason']}\n"
+        send_whatsapp(sender_phone, error_message)
+    
+    return {"status": "success"}
         
         elif action == "LIST":
     # Process each entry
