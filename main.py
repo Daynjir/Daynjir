@@ -43,7 +43,7 @@ Examples:
 
 def send_whatsapp(to_phone: str, message: str):
     clean_phone = str(to_phone).lstrip("+").split("@")[0].strip()
-    url = "https://7107.api.greenapi.com/waInstance710722757201/sendMessage/b3a2ccc5aa654185afdf4eaf22bd9c3a2b766efcc9d44ac1a3"
+   url = "https://7107.api.greenapi.com/waInstance710722758620/sendMessage/feb8f9b99fa047a3b8b3442b303b6cbb8564a60129604f149c"
     chat_id = f"{clean_phone}@c.us"
     payload = {"chatId": chat_id, "message": message}
     print(f"🔍 send_whatsapp called:")
