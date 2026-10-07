@@ -14,7 +14,7 @@ load_dotenv()
 app = FastAPI()
 
 # Securely load credentials from Render's Environment panel variables
-supabase: Client = create_client(os.getenv("https://eykvkchadrdqskfhpkcg.supabase.co"), os.getenv("sb_publishable_ydmpcYgVnHkbnFld6TXbxg_uaL2Gkej"))
+supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 groq_client = Groq(api_key=os.getenv("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"))
 
 INSTANCE_ID = "710722758620"
