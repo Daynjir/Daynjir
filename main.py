@@ -223,7 +223,7 @@ async def whatsapp_webhook(request: Request):
                         send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay deyntii oo dhan.")
                     else:
                         updated = supabase.table("debtors").update({"amount": new_balance}).eq("shopkeeper_id", shopkeeper_id).eq("name", debtor["name"]).eq("amount", debtor["amount"]).execute()
-                        send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay ${payment_amount}. Haray: ${new_balance}")
+                        send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay ${payment_amount}. baaqi: ${new_balance}")
                     
             except Exception as e:
                 send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
