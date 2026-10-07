@@ -25,20 +25,25 @@ SYSTEM_PROMPT = """You are Daynjir, a Somali debt management assistant for small
 Extract transaction intent from chaotic, unstructured Somali text into raw JSON. 
 Do not include any conversational filler, markdown syntax, or backticks.
 
-Determine if the shopkeeper wants to ADD a new debt, mark an existing debt as PAID, or LIST their debts.
-Carefully calculate 'days_until_due' by finding the difference between today's date and the requested promise target deadline date mentioned in the message text.
+Extract ALL debt entries from the message.
+For each entry, extract: customer_name, amount, promised_date (YYYY-MM-DD)
 
-Response format: 
-{"action": "ADD" or "PAY" or "LIST", "customer_name": "string or null", "amount": number or null, "days_until_due": number or null, "customer_phone": "string or null"}
+ALWAYS return a JSON array, even for single entries.
+
+Response format (JSON array):
+[
+  {"action": "ADD" or "PAY" or "LIST", "customer_name": "string or null", "amount": number or null, "days_until_due": number or null, "customer_phone": "string or null", "promised_date": "YYYY-MM-DD or null"}
+]
 
 Examples:
-'Cali 20$ oo bari ah' -> {"action": "ADD", "customer_name": "Cali", "amount": 20, "days_until_due": 1, "customer_phone": null}
-'Xasan baa 15 doolar qaatay maanta' -> {"action": "ADD", "customer_name": "Xasan", "amount": 15, "days_until_due": 0, "customer_phone": null}
-'Cali wuu bixiyay hantidii' -> {"action": "PAY", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": null}
-'Gaawe wuxuu bixiyay $5' -> {"action": "PAY", "customer_name": "Gaawe", "amount": 5, "days_until_due": null, "customer_phone": null}
-'List my debts' -> {"action": "LIST", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null}
-'My debts' -> {"action": "LIST", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null}
-'Liiska deynta' -> {"action": "LIST", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null}
+'Cali 20$ oo bari ah' -> [{"action": "ADD", "customer_name": "Cali", "amount": 20, "days_until_due": 1, "customer_phone": null, "promised_date": "2026-10-08"}]
+'Cali $34 oct 8, Axmed $50 oct 9' -> [{"action": "ADD", "customer_name": "Cali", "amount": 34, "days_until_due": 1, "customer_phone": null, "promised_date": "2026-10-08"}, {"action": "ADD", "customer_name": "Axmed", "amount": 50, "days_until_due": 2, "customer_phone": null, "promised_date": "2026-10-09"}]
+'Xasan baa 15 doolar qaatay maanta' -> [{"action": "ADD", "customer_name": "Xasan", "amount": 15, "days_until_due": 0, "customer_phone": null, "promised_date": "2026-10-07"}]
+'Cali wuu bixiyay hantidii' -> [{"action": "PAY", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null}]
+'Gaawe wuxuu bixiyay $5' -> [{"action": "PAY", "customer_name": "Gaawe", "amount": 5, "days_until_due": null, "customer_phone": null, "promised_date": null}]
+'List my debts' -> [{"action": "LIST", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null}]
+'My debts' -> [{"action": "LIST", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null}]
+'Liiska deynta' -> [{"action": "LIST", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null}]
 """
 
 def send_whatsapp(to_phone: str, message: str):
@@ -125,32 +130,70 @@ async def whatsapp_webhook(request: Request):
         
     print(f"🤖 Groq AI Processed Output: {ai_response}")
     
-    try:
-        clean_json = re.search(r'\{.*\}', ai_response, re.DOTALL).group()
-        parsed = json.loads(clean_json)
-    except Exception:
-        send_whatsapp(sender_phone, "❌ ma fahmin qoraalkaaga. Fadlan u qor si cad.")
-        return {"status": "parsing_failed"}
+   # Process each entry
+successful_inserts = []
+failed_inserts = []
 
-    action = parsed.get("action", "ADD")
-    name = parsed.get("customer_name")
+for entry in entries:
+    action = entry.get("action", "ADD")
+    name = entry.get("customer_name")
+    amount = entry.get("amount")
+    promised_date = entry.get("promised_date")
     
+    # Validate name
     if not name and action != "LIST":
-        send_whatsapp(sender_phone, "❌ Ma hayo Magaca macmiilka.")
-        return {"status": "incomplete_data"}
-
-    if action == "PAY":
+        failed_inserts.append({"name": "Unknown", "reason": "No name"})
+        continue
+    
+    if action == "ADD":
         try:
-            payment_amount = parsed.get("amount")
+            debtor_data = {
+                'shopkeeper_id': shopkeeper_id,
+                'name': name,
+                'amount': float(amount) if amount else 0,
+                'promised_date': promised_date,
+                'phone_number': None,
+                'is_paid': False
+            }
             
-            debtor_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").eq("is_paid", False).order("id", desc=False).limit(1).execute()
+            result = supabase.table("debtors").insert(debtor_data).execute()
+            successful_inserts.append(entry)
             
-            if not debtor_query.data:
-                send_whatsapp(sender_phone, f"❌ Lama helin deynta {name}.")
-                return {"status": "debtor_not_found"}
-            
-            debtor = debtor_query.data[0]
-            current_balance = float(debtor["amount"])
+        except Exception as e:
+            failed_inserts.append({"name": name, "reason": str(e)})
+    
+    elif action == "PAY":
+        # Your existing PAY logic here
+        pass
+    
+    elif action == "LIST":
+        # Your existing LIST logic here
+        pass
+
+# Send confirmation
+if successful_inserts:
+    if len(successful_inserts) == 1:
+        entry = successful_inserts[0]
+        success_message = f"""✅ Deyntii waa la keydiyay!
+
+👤 Macmiilka: {entry['customer_name']}
+💵 Lacagta: ${entry['amount']}
+📅 Ballanta: {entry['promised_date']}"""
+    else:
+        success_message = f"""✅ {len(successful_inserts)} deyntii waa la keydiyay!
+
+"""
+        for entry in successful_inserts:
+            success_message += f"""👤 {entry['customer_name']}: ${entry['amount']} - {entry['promised_date']}
+"""
+    
+    send_whatsapp(sender_phone, success_message)
+
+if failed_inserts:
+    error_message = f"❌ {len(failed_inserts)} deyntii ma keydsamin:\n"
+    for fail in failed_inserts:
+        error_message += f"- {fail['name']}: {fail['reason']}\n"
+    send_whatsapp(sender_phone, error_message)
             
             if payment_amount is None:
                 supabase.table("debtors").update({"amount": 0, "is_paid": True}).eq("id", debtor["id"]).execute()
