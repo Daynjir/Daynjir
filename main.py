@@ -193,25 +193,34 @@ async def whatsapp_webhook(request: Request):
                 added_count = 0
                 failed_count = 0
                 
-                for index, row in df.iterrows():
-                    try:
-                        name = str(row['Name']).strip()
-                        amount = float(row['Amount'])
-                        due_date = str(row.get('Due Date', row.get('due_date', ''))).strip()
-                        
-                        if due_date and due_date != 'nan':
-                            try:
-                                for fmt in ['%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%m/%d/%Y']:
-                                    try:
-                                        parsed_date = datetime.strptime(due_date, fmt)
-                                        due_date = parsed_date.strftime('%Y-%m-%d')
-                                        break
-                                    except:
-                                        continue
-                            except:
-                                due_date = (datetime.utcnow() + timedelta(hours=3)).date().isoformat()
-                        else:
-                            due_date = (datetime.utcnow() + timedelta(hours=3)).date().isoformat()
+               for index, row in df.iterrows():
+    try:
+        name = str(row['Name']).strip()
+        amount = float(row['Amount'])
+        
+        # FIX: Handle Excel date properly
+        due_date = None
+        due_val = row.get('Due Date', row.get('due_date', None))
+        
+        if due_val is not None and str(due_val).strip() != 'nan' and str(due_val).strip() != '':
+            # Check if it's a datetime object (Excel format)
+            if hasattr(due_val, 'strftime'):
+                due_date = due_val.strftime('%Y-%m-%d')
+            else:
+                # It's a string - try to parse
+                due_str = str(due_val).strip()
+                try:
+                    for fmt in ['%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%m/%d/%Y']:
+                        try:
+                            parsed_date = datetime.strptime(due_str, fmt)
+                            due_date = parsed_date.strftime('%Y-%m-%d')
+                            break
+                        except:
+                            continue
+                except:
+                    due_date = (datetime.utcnow() + timedelta(hours=3)).date().isoformat()
+        else:
+            due_date = (datetime.utcnow() + timedelta(hours=3)).date().isoformat()
                         
                         debtor_data = {
                             'shopkeeper_id': shopkeeper_id,
