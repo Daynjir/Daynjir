@@ -135,7 +135,7 @@ async def whatsapp_webhook(request: Request):
     sender_phone = sender_chat_id.split("@")[0]
     print(f"🔍 SENDER PHONE: {sender_phone}")
     
-        message_data = data.get("messageData", {})
+    message_data = data.get("messageData", {})
     type_message = message_data.get("typeMessage")
     
     message_text = ""
