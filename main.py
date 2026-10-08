@@ -357,7 +357,7 @@ async def whatsapp_webhook(request: Request):
                 
                 if not debts_query.data:
                     if filter_date:
-                        send_whatsapp(sender_phone, f"✅ Ma jiraan deynta balamaheedu yahay {filter_date}.")
+                        send_whatsapp(sender_phone, f"✅ Ma jiraan deymo balanteedu tahay {filter_date}.")
                     else:
                         send_whatsapp(sender_phone, "✅ Ma hayo Deyn aan la bixin. All debts are paid!")
                 else:
@@ -620,7 +620,7 @@ async def daily_digest():
         
         if due_today:
             print(f"📤 Sending message to {sk_phone}")
-            msg = "☀️ *Xasuusinta Maalinle ah ee Daynjir* ☀️\n\n*Balamaha maanta & kuwa dhaafay:*\n" + "\n".join(due_today)
+            msg = "☀️ *Xasuusinta Maalinle ah ee Daynjir* ☀️\n\n*Balamaha maanta & kuwa dhaafay: *\n" + "\n".join(due_today)
             send_whatsapp(sk_phone, msg)
         else:
             print("⚠️ No debts due today")
