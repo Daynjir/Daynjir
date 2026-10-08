@@ -8,6 +8,8 @@ from groq import Groq
 import requests
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
+import pandas as pd
+from io import BytesIO
 
 load_dotenv()
 
@@ -132,6 +134,7 @@ async def whatsapp_webhook(request: Request):
         
     sender_phone = sender_chat_id.split("@")[0]
     print(f"🔍 SENDER PHONE: {sender_phone}")
+    
     
     message_data = data.get("messageData", {})
     type_message = message_data.get("typeMessage")
