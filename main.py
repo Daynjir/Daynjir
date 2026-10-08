@@ -527,12 +527,39 @@ async def whatsapp_webhook(request: Request):
                     send_whatsapp(sender_phone, f"❌ Lama helin {name}.")
                 else:
                     debt_list = []
-                    total = 0
-                    for i, debt in enumerate(debts_query.data, 1):
-                        debt_list.append(f"{i}. {debt['name']}: ${debt['amount']} - Due: {debt['promised_date']}")
-                        if debt.get('phone_number'):
-                            debt_list[-1] += f" 📞 {debt['phone_number']}"
-                        total += debt['amount']
+total = 0
+overdue_count = 0
+today = datetime.utcnow().date()
+
+for i, debt in enumerate(debts_query.data, 1):
+    name = debt['name']
+    amount = debt['amount']
+    due_date = debt.get('promised_date')
+    
+    # Check if overdue
+    status = ""
+    if due_date:
+        try:
+            due = datetime.strptime(due_date, '%Y-%m-%d').date()
+            days_diff = (due - today).days
+            
+            if days_diff < 0:
+                # Overdue
+                status = f" ⚠️ Balan dhaaf ({abs(days_diff)} days)"
+                overdue_count += 1
+            elif days_diff == 0:
+                status = " ⚠️ Balan Maanta"
+            elif days_diff <= 3:
+                status = f" ⏰  {days_diff} maalin kadib"
+        except:
+            pass
+    
+    if show_due_dates:
+        debt_list.append(f"{i}. {name}: ${amount}{status} - {due_date}")
+    else:
+        debt_list.append(f"{i}. {name}: ${amount}{status}")
+    
+    total += amount
                     
                     message = f"🔍 *Search Results for {name}* ({len(debts_query.data)} found):\n\n" + "\n".join(debt_list)
                     message += f"\n\n💰 **Total: ${total:.2f}**"
