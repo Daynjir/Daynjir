@@ -7,6 +7,7 @@ from supabase import create_client, Client
 from groq import Groq
 import requests
 from dotenv import load_dotenv
+from datetime import datetime, timedelta, timezone
 
 load_dotenv()
 
@@ -36,8 +37,8 @@ Response format (JSON array):
 ]
 
 Examples - ADD:
-'Cali 20$ oo bari ah' -> [{"action": "ADD", "customer_name": "Cali", "amount": 20, "days_until_due": 1, "customer_phone": null, "promised_date": "2026-10-08", "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
-'Cali $34 oct 8, Axmed $50 oct 9' -> [{"action": "ADD", "customer_name": "Cali", "amount": 34, "days_until_due": 1, "customer_phone": null, "promised_date": "2026-10-08", "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}, {"action": "ADD", "customer_name": "Axmed", "amount": 50, "days_until_due": 2, "customer_phone": null, "promised_date": "2026-10-09", "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
+'Cali 20$ oo bari ah' -> Use today's date + 1 day for promised_date
+'Cali $34 oct 8, Axmed $50 oct 9' -> [{"action": "ADD", "customer_name": "Cali", "amount": 34, "days_until_due": 1, "customer_phone": null, "promised_date": "YYYY-MM-DD", "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}, {"action": "ADD", "customer_name": "Axmed", "amount": 50, "days_until_due": 2, "customer_phone": null, "promised_date": "YYYY-MM-DD", "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
 
 Examples - PAY:
 'Cali wuu bixiyay' -> [{"action": "PAY", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
@@ -45,7 +46,8 @@ Examples - PAY:
 
 Examples - LIST:
 'Liiska deynta' -> [{"action": "LIST", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
-'Balamaha maanta' -> [{"action": "LIST", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": "2026-10-07", "filter_type": "today", "new_amount": null, "new_date": null, "new_phone": null}]
+'Balamaha maanta' -> Use today's date for filter_date
+'Balamaha berri' -> Use today's date + 1 day for filter_date
 'Balamaha Oct 15' -> [{"action": "LIST", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": "2026-10-15", "filter_type": "date", "new_amount": null, "new_date": null, "new_phone": null}]
 
 Examples - SEARCH:
@@ -90,8 +92,6 @@ Also support English:
 'Report' = REPORT action
 'Export' = EXPORT action
 """
-
-
 def send_whatsapp(to_phone: str, message: str):
     clean_phone = str(to_phone).lstrip("+").split("@")[0].strip()
     url = "https://7107.api.greenapi.com/waInstance710722758620/sendMessage/feb8f9b99fa047a3b8b3442b303b6cbb8564a60129604f149c"
@@ -147,6 +147,43 @@ async def whatsapp_webhook(request: Request):
     if not message_text:
         return {"status": "empty_text"}
     
+    # ✅ CHECK IF USER IS ALREADY APPROVED
+    try:
+        approved_check = supabase.table("approved_users").select("*").eq("phone_number", sender_phone).execute()
+        
+        if not approved_check.data:
+            # User is NOT approved - check if this is the owner
+            OWNER_PHONE = "252904039457"  # ← REPLACE WITH YOUR PHONE NUMBER
+            
+            if sender_phone == OWNER_PHONE:
+                # Owner - allow but don't add to approved_users
+                pass
+            else:
+                # New user - notify owner and reject
+                try:
+                    supabase.table("pending_users").insert({"phone_number": sender_phone}).execute()
+                except:
+                    pass
+                
+                send_whatsapp(OWNER_PHONE, f"🔔 NEW USER REQUEST:\n\nPhone: {sender_phone}\n\nAdd this number to approved_users table to allow access.")
+                send_whatsapp(sender_phone, "⏳ Your request is pending approval. Contact the owner.")
+                return {"status": "pending"}
+                
+    except Exception as auth_err:
+        print(f"❌ Authorization check failed: {auth_err}")
+    
+    # Get or create shopkeeper
+    try:
+        sk_query = supabase.table("shopkeepers").select("*").eq("phone_number", sender_phone).execute()
+        if not sk_query.data:
+            sk_insert = supabase.table("shopkeepers").insert({"phone_number": sender_phone}).execute()
+            shopkeeper_id = sk_insert.data[0]["id"]
+        else:
+            shopkeeper_id = sk_query.data[0]["id"]
+    except Exception as db_err:
+        print(f"❌ DATABASE ERROR (Shopkeepers Lookup): {db_err}")
+        return {"status": "shopkeeper_db_error"}
+      
     # Get or create shopkeeper
     try:
         sk_query = supabase.table("shopkeepers").select("*").eq("phone_number", sender_phone).execute()
