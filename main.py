@@ -373,7 +373,7 @@ async def whatsapp_webhook(request: Request):
             failed_inserts.append({"name": "Unknown", "reason": "No name"})
             continue
         
-        if action == "ADD":
+                if action == "ADD":
             try:
                 if not promised_date and days_until_due is not None:
                     promised_date = (datetime.utcnow() + timedelta(days=int(days_until_due))).date().isoformat()
@@ -407,36 +407,6 @@ async def whatsapp_webhook(request: Request):
                 failed_inserts.append({"name": name, "reason": str(e)})
         
         elif action == "PAY":
-            try:
-                payment_amount = entry.get("amount")
-                
-                debtor_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").eq("is_paid", False).order("promised_date", desc=False).limit(1).execute()
-                
-                if not debtor_query.data:
-                    send_whatsapp(sender_phone, f"❌ Lama helin deynta {name}.")
-                    failed_inserts.append({"name": name, "reason": "Debtor not found"})
-                    continue
-                
-                debtor = debtor_query.data[0]
-                current_balance = float(debtor["amount"])
-                
-                if payment_amount is None:
-                    updated = supabase.table("debtors").update({"is_paid": True}).eq("shopkeeper_id", shopkeeper_id).eq("name", debtor["name"]).eq("amount", debtor["amount"]).execute()
-                    send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay deyntii (${current_balance}).")
-                else:
-                    new_balance = current_balance - float(payment_amount)
-                    if new_balance <= 0:
-                        updated = supabase.table("debtors").update({"is_paid": True, "amount": 0}).eq("shopkeeper_id", shopkeeper_id).eq("name", debtor["name"]).eq("amount", debtor["amount"]).execute()
-                        send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay deyntii oo dhan.")
-                    else:
-                        updated = supabase.table("debtors").update({"amount": new_balance}).eq("shopkeeper_id", shopkeeper_id).eq("name", debtor["name"]).eq("amount", debtor["amount"]).execute()
-                        send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay ${payment_amount}. Haray: ${new_balance}")
-                    
-            except Exception as e:
-                send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
-                failed_inserts.append({"name": name, "reason": f"Payment error: {str(e)}"})
-        
-                elif action == "PAY":
             try:
                 payment_amount = entry.get("amount")
                 
