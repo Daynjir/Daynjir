@@ -140,7 +140,7 @@ async def whatsapp_webhook(request: Request):
     
     message_text = ""
     
-           # ✅ HANDLE EXCEL/CSV FILES
+    # ✅ HANDLE EXCEL/CSV FILES
     if type_message == "documentMessage":
         print("📄 Excel/CSV file detected!")
         try:
@@ -267,7 +267,7 @@ async def whatsapp_webhook(request: Request):
             print(f"❌ File error: {str(file_err)}")
             send_whatsapp(sender_phone, f"❌ File error: {str(file_err)}")
             return {"status": "file_error"}
-          
+    
     # ✅ HANDLE TEXT MESSAGES
     try:
         if type_message == "textMessage":
@@ -355,7 +355,7 @@ async def whatsapp_webhook(request: Request):
 
     successful_inserts = []
     failed_inserts = []
-
+    
     for entry in entries:
         action = entry.get("action", "ADD")
         name = entry.get("customer_name")
@@ -373,7 +373,7 @@ async def whatsapp_webhook(request: Request):
             failed_inserts.append({"name": "Unknown", "reason": "No name"})
             continue
         
-                if action == "ADD":
+        if action == "ADD":
             try:
                 if not promised_date and days_until_due is not None:
                     promised_date = (datetime.utcnow() + timedelta(days=int(days_until_due))).date().isoformat()
@@ -743,110 +743,6 @@ async def daily_digest():
             print("⚠️ No debts due today")
             
     print("✅ DAILY DIGEST COMPLETED")
-    return {"status": "done"}
-@app.post("/webhook")  # ← CORRECT: No indentation
-async def whatsapp_webhook(request: Request):  # ← CORRECT: No indentation
-    data = await request.json()
-    print(f"📥 RAW GREEN-API WEBHOOK PAYLOAD: {json.dumps(data)}")
-    
-    allowed_types = ["incomingMessageReceived", "outgoingMessageReceived"]
-    if data.get("typeWebhook") not in allowed_types:
-        return {"status": "ignored"}
-        
-    sender_data = data.get("senderData", {})
-    sender_chat_id = sender_data.get("chatId")
-    if not sender_chat_id:
-        return {"status": "no_chat_id"}
-        
-    sender_phone = sender_chat_id.split("@")[0]
-    print(f"🔍 SENDER PHONE: {sender_phone}")
-    
-    message_data = data.get("messageData", {})
-    type_message = message_data.get("typeMessage")
-    
-    message_text = ""
-    try:
-        if type_message == "textMessage":
-            message_text = message_data["textMessageData"]["textMessage"]
-        elif type_message == "extendedTextMessage":
-            message_text = message_data["extendedTextMessageData"]["text"]
-        else:
-            return {"status": "unsupported_message_type"}
-    except KeyError:
-        return {"status": "no_text_payload"}
-        
-    if not message_text:
-        return {"status": "empty_text"}
-    
-    # ✅ CHECK IF THIS IS YOUR PHONE NUMBER (OWNER)
-    OWNER_PHONE = "252904039457"  # Replace with YOUR phone number
-    
-    # ✅ CHECK IF USER IS ALREADY APPROVED
-    try:
-        approved_check = supabase.table("approved_users").select("*").eq("phone_number", sender_phone).execute()
-        
-        if approved_check.data:
-            # User is approved, continue normally
-            pass
-        else:
-            # User is NOT approved
-            if sender_phone == OWNER_PHONE:
-                # This is YOU (owner) - check if approving someone
-                if message_text.upper() == "ACCEPT":
-                    # Get the last pending user and approve them
-                    pending = supabase.table("pending_users").select("*").eq("status", "pending").order("created_at", desc=True).limit(1).execute()
-                    if pending.data:
-                        pending_user = pending.data[0]["phone_number"]
-                        # Add to approved
-                        supabase.table("approved_users").insert({"phone_number": pending_user}).execute()
-                        # Update pending status
-                        supabase.table("pending_users").update({"status": "approved"}).eq("phone_number", pending_user).execute()
-                        send_whatsapp(pending_user, "✅ You have been approved to use Daynjir bot!")
-                        send_whatsapp(sender_phone, f"✅ User {pending_user} approved!")
-                    else:
-                        send_whatsapp(sender_phone, "❌ No pending users to approve.")
-                    return {"status": "success"}
-                    
-                elif message_text.upper() == "REJECT":
-                    # Get the last pending user and reject them
-                    pending = supabase.table("pending_users").select("*").eq("status", "pending").order("created_at", desc=True).limit(1).execute()
-                    if pending.data:
-                        pending_user = pending.data[0]["phone_number"]
-                        # Update pending status
-                        supabase.table("pending_users").update({"status": "rejected"}).eq("phone_number", pending_user).execute()
-                        send_whatsapp(pending_user, "❌ Your request to use Daynjir bot has been rejected.")
-                        send_whatsapp(sender_phone, f"✅ User {pending_user} rejected!")
-                    else:
-                        send_whatsapp(sender_phone, "❌ No pending users to reject.")
-                    return {"status": "success"}
-                else:
-                    # You sending normal message - continue
-                    pass
-            else:
-                # This is a NEW user - add to pending and notify owner
-                try:
-                    supabase.table("pending_users").insert({"phone_number": sender_phone}).execute()
-                except:
-                    pass  # Already pending
-                
-                # Notify YOU (owner)
-                send_whatsapp(OWNER_PHONE, f"🔔 NEW USER REQUEST:\n\nPhone: {sender_phone}\n\nReply ACCEPT or REJECT")
-                
-                # Tell user to wait
-                send_whatsapp(sender_phone, "⏳ Your request is pending approval. Please wait for the owner to approve you.")
-                return {"status": "pending"}
-                
-    except Exception as auth_err:
-        print(f"❌ Authorization check failed: {auth_err}")
-        send_whatsapp(sender_phone, "❌ Authorization error. Please try again later.")
-        return {"status": "auth_error"}
-
-    # ... rest of your existing code continues ...
-        
-        if due_today:
-            msg = "☀️ *Xasuusinta Maalinle ah ee Daynjir* ☀️\n\n*Balamaha maanta & kuwa dhaafay:*\n" + "\n".join(due_today)
-            send_whatsapp(sk_phone, msg)
-            
     return {"status": "done"}
 
 
