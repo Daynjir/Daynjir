@@ -518,13 +518,19 @@ async def whatsapp_webhook(request: Request):
                                 days_diff = (due - today).days
                                 
                                 if days_diff < 0:
-                                    # Overdue
-                                    status = f" ⚠️ Balan dhaaf ({abs(days_diff)} days)"
-                                    overdue_count += 1
-                                elif days_diff == 0:
-                                    status = " ⚠️ Balan Maanta"
-                                elif days_diff <= 3:
-                                    status = f" ⏰ {days_diff} maalin kadib"
+    # Overdue
+    status = f" ⚠️ Balan dhaaf ({abs(days_diff)} days)"
+    overdue_count += 1
+elif days_diff == 0:
+    status = " ⚠️ Balan Maanta"
+elif days_diff <= 3:
+    # Show both days left AND the date
+    due_formatted = datetime.strptime(due_date, '%Y-%m-%d').strftime('%b %d')
+    status = f" ⏰ {days_diff} maalin kadib ({due_formatted})"
+else:
+    # More than 3 days - just show the date
+    due_formatted = datetime.strptime(due_date, '%Y-%m-%d').strftime('%b %d')
+    status = f" 📅 {due_formatted}"
                             except:
                                 pass
                         
