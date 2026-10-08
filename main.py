@@ -584,24 +584,43 @@ async def whatsapp_webhook(request: Request):
     return {"status": "success"}
 
 
-@app.get("/cron/daily-digest")  # ← NO leading spaces
-async def daily_digest():  # ← NO leading spaces
-    today = datetime.utcnow().date().isoformat()  # ← 4 spaces
-    shopkeepers = supabase.table("shopkeepers").select("*").execute()  # ← 4 spaces
+@app.get("/cron/daily-digest")
+async def daily_digest():
+    print("🔔 DAILY DIGEST STARTED")
+    today = (datetime.utcnow() + timedelta(hours=3)).date().isoformat()
+    print(f"📅 Today's date: {today}")
     
-    for sk in shopkeepers.data:  # ← 4 spaces
-        sk_id = sk["id"]  # ← 8 spaces
-        sk_phone = sk["phone_number"]  # ← 8 spaces
+    shopkeepers = supabase.table("shopkeepers").select("*").execute()
+    print(f"👥 Found {len(shopkeepers.data)} shopkeepers")
+    
+    for sk in shopkeepers.data:
+        sk_id = sk["id"]
+        sk_phone = sk["phone_number"]
+        print(f"📱 Processing shopkeeper: {sk_phone} (ID: {sk_id})")
         
-        debt_records = supabase.table("debtors").select("*").eq("shopkeeper_id", sk_id).eq("is_paid", False).execute()  # ← 8 spaces
-        if not debt_records.data:  # ← 8 spaces
-            continue  # ← 12 spaces
+        debt_records = supabase.table("debtors").select("*").eq("shopkeeper_id", sk_id).eq("is_paid", False).execute()
+        print(f"💰 Found {len(debt_records.data)} unpaid debts")
+        
+        if not debt_records.data:
+            print("⚠️ No debts, skipping...")
+            continue
             
-        due_today = []  # ← 8 spaces (CORRECT)
-        for record in debt_records.data:  # ← 8 spaces
-            if record["promised_date"] <= today:  # ← 12 spaces
-                due_today.append(f"• {record['name']}: ${record['amount']}")  # ← 12 spaces
-
+        due_today = []
+        for record in debt_records.data:
+            print(f"  - Checking: {record['name']}, due: {record['promised_date']}")
+            if record["promised_date"] <= today:
+                print(f"  ✅ Adding to due_today: {record['name']}")
+                due_today.append(f"• {record['name']}: ${record['amount']}")
+        
+        if due_today:
+            print(f"📤 Sending message to {sk_phone}")
+            msg = "☀️ *Xasuusinta Maalinle ah ee Daynjir* ☀️\n\n*Balamaha maanta & kuwa dhaafay:*\n" + "\n".join(due_today)
+            send_whatsapp(sk_phone, msg)
+        else:
+            print("⚠️ No debts due today")
+            
+    print("✅ DAILY DIGEST COMPLETED")
+    return {"status": "done"}
 @app.post("/webhook")  # ← CORRECT: No indentation
 async def whatsapp_webhook(request: Request):  # ← CORRECT: No indentation
     data = await request.json()
