@@ -471,7 +471,7 @@ async def whatsapp_webhook(request: Request):
                 # Build query
                 query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).eq("is_paid", False)
                 
-                # Apply date filter if exists
+                                # Apply date filter if exists
                 if filter_date:
                     query = query.eq("promised_date", filter_date)
                     if filter_type == "today":
@@ -502,14 +502,44 @@ async def whatsapp_webhook(request: Request):
                     
                     debt_list = []
                     total = 0
+                    overdue_count = 0
+                    today = datetime.utcnow().date()
+                    
                     for i, debt in enumerate(debts_query.data, 1):
+                        name = debt['name']
+                        amount = debt['amount']
+                        due_date = debt.get('promised_date')
+                        
+                        # Check if overdue
+                        status = ""
+                        if due_date:
+                            try:
+                                due = datetime.strptime(due_date, '%Y-%m-%d').date()
+                                days_diff = (due - today).days
+                                
+                                if days_diff < 0:
+                                    # Overdue
+                                    status = f" ⚠️ Balan dhaaf ({abs(days_diff)} days)"
+                                    overdue_count += 1
+                                elif days_diff == 0:
+                                    status = " ⚠️ Balan Maanta"
+                                elif days_diff <= 3:
+                                    status = f" ⏰ {days_diff} maalin kadib"
+                            except:
+                                pass
+                        
                         if show_due_dates:
-                            debt_list.append(f"{i}. {debt['name']}: ${debt['amount']} - {debt['promised_date']}")
+                            debt_list.append(f"{i}. {name}: ${amount}{status} - {due_date}")
                         else:
-                            debt_list.append(f"{i}. {debt['name']}: ${debt['amount']}")
-                        total += debt['amount']
+                            debt_list.append(f"{i}. {name}: ${amount}{status}")
+                        
+                        total += amount
                     
                     message = f"{message_title} ({len(debts_query.data)} debtor(s)):\n\n" + "\n".join(debt_list)
+                    
+                    if overdue_count > 0:
+                        message = f"⚠️ *{overdue_count} overdue debt(s)*:\n\n" + message
+                    
                     message += f"\n\n💰 **Total: ${total:.2f}**"
                     
                     send_whatsapp(sender_phone, message)
@@ -517,58 +547,6 @@ async def whatsapp_webhook(request: Request):
             except Exception as e:
                 send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
                 failed_inserts.append({"name": "LIST", "reason": f"List error: {str(e)}"})
-        
-        elif action == "SEARCH":
-            try:
-                # Search for debtor by name
-                debts_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").eq("is_paid", False).execute()
-                
-                if not debts_query.data:
-                    send_whatsapp(sender_phone, f"❌ Lama helin {name}.")
-                else:
-                    debt_list = []
-total = 0
-overdue_count = 0
-today = datetime.utcnow().date()
-
-for i, debt in enumerate(debts_query.data, 1):
-    name = debt['name']
-    amount = debt['amount']
-    due_date = debt.get('promised_date')
-    
-    # Check if overdue
-    status = ""
-    if due_date:
-        try:
-            due = datetime.strptime(due_date, '%Y-%m-%d').date()
-            days_diff = (due - today).days
-            
-            if days_diff < 0:
-                # Overdue
-                status = f" ⚠️ Balan dhaaf ({abs(days_diff)} days)"
-                overdue_count += 1
-            elif days_diff == 0:
-                status = " ⚠️ Balan Maanta"
-            elif days_diff <= 3:
-                status = f" ⏰  {days_diff} maalin kadib"
-        except:
-            pass
-    
-    if show_due_dates:
-        debt_list.append(f"{i}. {name}: ${amount}{status} - {due_date}")
-    else:
-        debt_list.append(f"{i}. {name}: ${amount}{status}")
-    
-    total += amount
-                    
-                    message = f"🔍 *Search Results for {name}* ({len(debts_query.data)} found):\n\n" + "\n".join(debt_list)
-                    message += f"\n\n💰 **Total: ${total:.2f}**"
-                    
-                    send_whatsapp(sender_phone, message)
-                    
-            except Exception as e:
-                send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
-                failed_inserts.append({"name": name, "reason": f"Search error: {str(e)}"})
         
         elif action == "EDIT":
             try:
