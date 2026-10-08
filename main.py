@@ -352,10 +352,10 @@ async def whatsapp_webhook(request: Request):
     except Exception as e:
         instructions = """❌ Ma fahmin qoraalkaaga.
 
-📖 **Fadlan soo qor:*
+📖 **Fadlan Raac Tilmaamahan:*
 
-✅ **Keydi deynta:**
-   magaca $lacagta
+✅ **si aad u Keydiso deyn cusub:**
+   qor magaca iyo $ lacagta
    tusaale:
    Axmed $100 balanta=beri
 
@@ -363,7 +363,7 @@ async def whatsapp_webhook(request: Request):
    Liiska deynta
    Balamaha maanta
 
-✅ **Bixi deynta:
+✅ **Deyn bixinta:
    Cali wuu bixiyay
    Axmed wuxuu bixiyay $50
 
