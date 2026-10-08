@@ -626,7 +626,7 @@ async def whatsapp_webhook(request: Request):
                 send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
                 failed_inserts.append({"name": "LIST", "reason": f"List error: {str(e)}"})
 
-                elif action == "EDIT":
+        elif action == "EDIT":
             try:
                 matches = find_debtor_matches(shopkeeper_id, name)
 
