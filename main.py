@@ -172,6 +172,7 @@ async def whatsapp_webhook(request: Request):
                 
                 print(f"📊 Found {len(df)} rows in file")
                 print(f"📋 Columns: {list(df.columns)}")
+              print(f"🔍 Due column values: {df.get('Due', df.get('Due Date', df.get('due_date', 'NOT FOUND'))).tolist()}")
                 
                 required_cols = ['Name', 'Amount']
                 if not all(col in df.columns for col in required_cols):
