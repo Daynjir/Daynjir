@@ -135,10 +135,122 @@ async def whatsapp_webhook(request: Request):
     sender_phone = sender_chat_id.split("@")[0]
     print(f"🔍 SENDER PHONE: {sender_phone}")
     
-    message_data = data.get("messageData", {})
+        message_data = data.get("messageData", {})
     type_message = message_data.get("typeMessage")
     
     message_text = ""
+    
+    # ✅ HANDLE EXCEL/CSV FILES
+    if type_message == "documentMessage":
+        print("📄 Excel/CSV file detected!")
+        try:
+            doc_data = message_data["documentMessageData"]
+            file_name = doc_data.get("fileName", "")
+            
+            if not (file_name.endswith('.xlsx') or file_name.endswith('.xls') or file_name.endswith('.csv')):
+                send_whatsapp(sender_phone, "❌ Please send Excel (.xlsx, .xls) or CSV file only.")
+                return {"status": "unsupported_file_type"}
+            
+            download_url = doc_data.get("downloadUrl")
+            if not download_url:
+                send_whatsapp(sender_phone, "❌ Could not download file.")
+                return {"status": "no_download_url"}
+            
+            print(f"📥 Downloading file: {file_name}")
+            
+            file_response = requests.get(download_url, timeout=30)
+            if file_response.status_code != 200:
+                send_whatsapp(sender_phone, "❌ Failed to download file.")
+                return {"status": "download_failed"}
+            
+            try:
+                print("🔍 Parsing file...")
+                if file_name.endswith('.csv'):
+                    df = pd.read_csv(BytesIO(file_response.content))
+                else:
+                    df = pd.read_excel(BytesIO(file_response.content), engine='openpyxl')
+                
+                print(f"📊 Found {len(df)} rows in file")
+                print(f"📋 Columns: {list(df.columns)}")
+                
+                required_cols = ['Name', 'Amount']
+                if not all(col in df.columns for col in required_cols):
+                    send_whatsapp(sender_phone, "❌ File must have 'Name' and 'Amount' columns.")
+                    return {"status": "missing_columns"}
+                
+                try:
+                    sk_query = supabase.table("shopkeepers").select("*").eq("phone_number", sender_phone).execute()
+                    if not sk_query.data:
+                        sk_insert = supabase.table("shopkeepers").insert({"phone_number": sender_phone}).execute()
+                        shopkeeper_id = sk_insert.data[0]["id"]
+                    else:
+                        shopkeeper_id = sk_query.data[0]["id"]
+                except Exception as db_err:
+                    print(f"❌ DATABASE ERROR: {db_err}")
+                    send_whatsapp(sender_phone, "❌ Database error.")
+                    return {"status": "shopkeeper_db_error"}
+                
+                added_count = 0
+                failed_count = 0
+                
+                for index, row in df.iterrows():
+                    try:
+                        name = str(row['Name']).strip()
+                        amount = float(row['Amount'])
+                        due_date = str(row.get('Due Date', row.get('due_date', ''))).strip()
+                        
+                        if due_date and due_date != 'nan':
+                            try:
+                                for fmt in ['%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%m/%d/%Y']:
+                                    try:
+                                        parsed_date = datetime.strptime(due_date, fmt)
+                                        due_date = parsed_date.strftime('%Y-%m-%d')
+                                        break
+                                    except:
+                                        continue
+                            except:
+                                due_date = (datetime.utcnow() + timedelta(hours=3)).date().isoformat()
+                        else:
+                            due_date = (datetime.utcnow() + timedelta(hours=3)).date().isoformat()
+                        
+                        debtor_data = {
+                            'shopkeeper_id': shopkeeper_id,
+                            'name': name,
+                            'amount': amount,
+                            'promised_date': due_date,
+                            'is_paid': False
+                        }
+                        supabase.table("debtors").insert(debtor_data).execute()
+                        added_count += 1
+                        print(f"  ✅ Added: {name} - ${amount}")
+                        
+                    except Exception as row_err:
+                        print(f"  ❌ Row {index} failed: {row_err}")
+                        failed_count += 1
+                
+                if added_count > 0:
+                    msg = f"✅ Imported {added_count} debts from Excel!\n\n"
+                    msg += f"📊 **Summary:**\n"
+                    msg += f"✅ Added: {added_count}\n"
+                    if failed_count > 0:
+                        msg += f"❌ Failed: {failed_count}"
+                    send_whatsapp(sender_phone, msg)
+                else:
+                    send_whatsapp(sender_phone, "❌ No debts were imported. Check your file format.")
+                
+                return {"status": "excel_imported"}
+                
+            except Exception as parse_err:
+                print(f"❌ Parse error: {str(parse_err)}")
+                send_whatsapp(sender_phone, f"❌ Error parsing file: {str(parse_err)}")
+                return {"status": "parse_error"}
+                
+        except Exception as file_err:
+            print(f"❌ File error: {str(file_err)}")
+            send_whatsapp(sender_phone, f"❌ File error: {str(file_err)}")
+            return {"status": "file_error"}
+    
+    # ✅ HANDLE TEXT MESSAGES
     try:
         if type_message == "textMessage":
             message_text = message_data["textMessageData"]["textMessage"]
