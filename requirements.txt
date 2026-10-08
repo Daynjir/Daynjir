@@ -4,3 +4,5 @@ supabase
 groq
 requests
 python-dotenv
+pandas
+openpyxl
