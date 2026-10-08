@@ -500,7 +500,7 @@ async def whatsapp_webhook(request: Request):
                     # Check if user asked for due dates
                     show_due_dates = filter_date or any(keyword in message_text.lower() for keyword in ['balamaha', 'balamaha', 'balanta', 'ballanta', 'due'])
                     
-                    debt_list = []
+                                        debt_list = []
                     total = 0
                     overdue_count = 0
                     today = datetime.utcnow().date()
@@ -510,45 +510,45 @@ async def whatsapp_webhook(request: Request):
                         amount = debt['amount']
                         due_date = debt.get('promised_date')
                         
-                                            # Check if overdue
-                    status = ""
-                    if due_date:
-                        try:
-                            due = datetime.strptime(due_date, '%Y-%m-%d').date()
-                            days_diff = (due - today).days
-                            
-                            if days_diff < 0:
-                                # Overdue
-                                status = f" ⚠️ Balan dhaaf ({abs(days_diff)} days)"
-                                overdue_count += 1
-                            elif days_diff == 0:
-                                status = " 🔴 Balanta Maanta"
-                            elif days_diff <= 3:
-                                # Show both days left AND the date
-                                due_formatted = datetime.strptime(due_date, '%Y-%m-%d').strftime('%b %d')
-                                status = f" ⏰ {days_diff} maalin kadib ({due_formatted})"
-                            else:
-                                # More than 3 days - just show the date
-                                due_formatted = datetime.strptime(due_date, '%Y-%m-%d').strftime('%b %d')
-                                status = f" 📅 {due_formatted}"
-                        except:
-                            pass
+                        # Check if overdue
+                        status = ""
+                        if due_date:
+                            try:
+                                due = datetime.strptime(due_date, '%Y-%m-%d').date()
+                                days_diff = (due - today).days
+                                
+                                if days_diff < 0:
+                                    # Overdue
+                                    status = f" ⚠️ Balan dhaaf ({abs(days_diff)} days)"
+                                    overdue_count += 1
+                                elif days_diff == 0:
+                                    status = " 🔴 Balanta Maanta"
+                                elif days_diff <= 3:
+                                    # Show both days left AND the date
+                                    due_formatted = datetime.strptime(due_date, '%Y-%m-%d').strftime('%b %d')
+                                    status = f" ⏰ {days_diff} maalin kadib ({due_formatted})"
+                                else:
+                                    # More than 3 days - just show the date
+                                    due_formatted = datetime.strptime(due_date, '%Y-%m-%d').strftime('%b %d')
+                                    status = f" 📅 {due_formatted}"
+                            except:
+                                pass
+                        
+                        if show_due_dates:
+                            debt_list.append(f"{i}. {name}: ${amount}{status} - {due_date}")
+                        else:
+                            debt_list.append(f"{i}. {name}: ${amount}{status}")
+                        
+                        total += amount
                     
-                    if show_due_dates:
-                        debt_list.append(f"{i}. {name}: ${amount}{status} - {due_date}")
-                    else:
-                        debt_list.append(f"{i}. {name}: ${amount}{status}")
+                    message = f"{message_title} ({len(debts_query.data)} debtor(s)):\n\n" + "\n".join(debt_list)
                     
-                    total += amount
-                
-                message = f"{message_title} ({len(debts_query.data)} debtor(s)):\n\n" + "\n".join(debt_list)
-                
-                if overdue_count > 0:
-                    message = f"⚠️ *{overdue_count} overdue debt(s)*:\n\n" + message
-                
-                message += f"\n\n💰 **Total: ${total:.2f}**"
-                
-                send_whatsapp(sender_phone, message)
+                    if overdue_count > 0:
+                        message = f"⚠️ *{overdue_count} overdue debt(s)*:\n\n" + message
+                    
+                    message += f"\n\n💰 **Total: ${total:.2f}**"
+                    
+                    send_whatsapp(sender_phone, message)
                 
             except Exception as e:
                 send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
