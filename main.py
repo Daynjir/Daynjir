@@ -349,8 +349,33 @@ async def whatsapp_webhook(request: Request):
         if not entries:
             raise Exception("Empty entries")
             
-    except Exception as e:
-        send_whatsapp(sender_phone, "❌ ma fahmin qoraalkaaga. Fadlan u qor si cad.")
+        except Exception as e:
+        instructions = """❌ Ma fahmin qoraalkaaga.
+
+📖 **Fadlan soo qor:*
+
+✅ **Keydi deynta:**
+   magaca $lacagta
+   tusaale:
+   Axmed $100 balanta=beri
+
+✅ **Liiska deynta:
+   Liiska deynta
+   Balamaha maanta
+
+✅ **Bixi deynta:
+   Cali wuu bixiyay
+   Axmed wuxuu bixiyay $50
+
+✅ **Tirtir:
+   delete Cali
+   remove Axmed
+
+✅ **Warbixin:**
+   Report
+  """
+        
+        send_whatsapp(sender_phone, instructions)
         return {"status": "parsing_failed"}
 
     successful_inserts = []
