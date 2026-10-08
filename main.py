@@ -436,7 +436,7 @@ async def whatsapp_webhook(request: Request):
                 send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
                 failed_inserts.append({"name": name, "reason": f"Payment error: {str(e)}"})
         
-        elif action == "PAY":
+                elif action == "PAY":
             try:
                 payment_amount = entry.get("amount")
                 
@@ -466,7 +466,7 @@ async def whatsapp_webhook(request: Request):
                 send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
                 failed_inserts.append({"name": name, "reason": f"Payment error: {str(e)}"})
         
-                elif action == "LIST":
+        elif action == "LIST":
             try:
                 # Build query
                 query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).eq("is_paid", False)
