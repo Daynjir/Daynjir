@@ -466,12 +466,12 @@ async def whatsapp_webhook(request: Request):
                 send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
                 failed_inserts.append({"name": name, "reason": f"Payment error: {str(e)}"})
         
-        elif action == "LIST":
+                elif action == "LIST":
             try:
                 # Build query
                 query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).eq("is_paid", False)
                 
-                                # Apply date filter if exists
+                # Apply date filter if exists
                 if filter_date:
                     query = query.eq("promised_date", filter_date)
                     if filter_type == "today":
@@ -500,7 +500,7 @@ async def whatsapp_webhook(request: Request):
                     # Check if user asked for due dates
                     show_due_dates = filter_date or any(keyword in message_text.lower() for keyword in ['balamaha', 'balamaha', 'balanta', 'ballanta', 'due'])
                     
-                                        debt_list = []
+                    debt_list = []
                     total = 0
                     overdue_count = 0
                     today = datetime.utcnow().date()
