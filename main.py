@@ -144,7 +144,7 @@ async def whatsapp_webhook(request: Request):
     if type_message == "documentMessage":
         print("📄 Excel/CSV file detected!")
         try:
-            doc_data = message_data["documentMessageData"]
+            doc_data = message_data["fileMessageData"]
             file_name = doc_data.get("fileName", "")
             
             if not (file_name.endswith('.xlsx') or file_name.endswith('.xls') or file_name.endswith('.csv')):
