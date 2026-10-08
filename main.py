@@ -140,7 +140,7 @@ async def whatsapp_webhook(request: Request):
     
     message_text = ""
     
-    # ✅ HANDLE EXCEL/CSV FILES
+       # ✅ HANDLE EXCEL/CSV FILES
     if type_message == "documentMessage":
         print("📄 Excel/CSV file detected!")
         try:
@@ -158,7 +158,7 @@ async def whatsapp_webhook(request: Request):
             
             print(f"📥 Downloading file: {file_name}")
             
-                        file_response = requests.get(download_url, timeout=30)
+            file_response = requests.get(download_url, timeout=30)
             if file_response.status_code != 200:
                 send_whatsapp(sender_phone, "❌ Failed to download file.")
                 return {"status": "download_failed"}
@@ -253,7 +253,7 @@ async def whatsapp_webhook(request: Request):
             print(f"❌ File error: {str(file_err)}")
             send_whatsapp(sender_phone, f"❌ File error: {str(file_err)}")
             return {"status": "file_error"}
-    
+          
     # ✅ HANDLE TEXT MESSAGES
     try:
         if type_message == "textMessage":
