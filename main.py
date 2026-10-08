@@ -158,7 +158,7 @@ async def whatsapp_webhook(request: Request):
             
             print(f"📥 Downloading file: {file_name}")
             
-            file_response = requests.get(download_url, timeout=30)
+                        file_response = requests.get(download_url, timeout=30)
             if file_response.status_code != 200:
                 send_whatsapp(sender_phone, "❌ Failed to download file.")
                 return {"status": "download_failed"}
@@ -193,34 +193,34 @@ async def whatsapp_webhook(request: Request):
                 added_count = 0
                 failed_count = 0
                 
-               for index, row in df.iterrows():
-    try:
-        name = str(row['Name']).strip()
-        amount = float(row['Amount'])
-        
-        # FIX: Handle Excel date properly
-        due_date = None
-        due_val = row.get('Due Date', row.get('due_date', None))
-        
-        if due_val is not None and str(due_val).strip() != 'nan' and str(due_val).strip() != '':
-            # Check if it's a datetime object (Excel format)
-            if hasattr(due_val, 'strftime'):
-                due_date = due_val.strftime('%Y-%m-%d')
-            else:
-                # It's a string - try to parse
-                due_str = str(due_val).strip()
-                try:
-                    for fmt in ['%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%m/%d/%Y']:
-                        try:
-                            parsed_date = datetime.strptime(due_str, fmt)
-                            due_date = parsed_date.strftime('%Y-%m-%d')
-                            break
-                        except:
-                            continue
-                except:
-                    due_date = (datetime.utcnow() + timedelta(hours=3)).date().isoformat()
-        else:
-            due_date = (datetime.utcnow() + timedelta(hours=3)).date().isoformat()
+                for index, row in df.iterrows():
+                    try:
+                        name = str(row['Name']).strip()
+                        amount = float(row['Amount'])
+                        
+                        # FIX: Handle Excel date properly
+                        due_date = None
+                        due_val = row.get('Due Date', row.get('due_date', None))
+                        
+                        if due_val is not None and str(due_val).strip() != 'nan' and str(due_val).strip() != '':
+                            # Check if it's a datetime object (Excel format)
+                            if hasattr(due_val, 'strftime'):
+                                due_date = due_val.strftime('%Y-%m-%d')
+                            else:
+                                # It's a string - try to parse
+                                due_str = str(due_val).strip()
+                                try:
+                                    for fmt in ['%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%m/%d/%Y']:
+                                        try:
+                                            parsed_date = datetime.strptime(due_str, fmt)
+                                            due_date = parsed_date.strftime('%Y-%m-%d')
+                                            break
+                                        except:
+                                            continue
+                                except:
+                                    due_date = (datetime.utcnow() + timedelta(hours=3)).date().isoformat()
+                        else:
+                            due_date = (datetime.utcnow() + timedelta(hours=3)).date().isoformat()
                         
                         debtor_data = {
                             'shopkeeper_id': shopkeeper_id,
@@ -238,20 +238,15 @@ async def whatsapp_webhook(request: Request):
                         failed_count += 1
                 
                 if added_count > 0:
-                    msg = f"✅ Imported {added_count} debts from Excel!\n\n"
-                    msg += f"📊 **Summary:**\n"
-                    msg += f"✅ Added: {added_count}\n"
-                    if failed_count > 0:
-                        msg += f"❌ Failed: {failed_count}"
-                    send_whatsapp(sender_phone, msg)
+                    send_whatsapp(sender_phone, f"✅ Imported {added_count} debts from Excel!\n\n📊 **Summary**:\n✅ Added: {added_count}")
                 else:
-                    send_whatsapp(sender_phone, "❌ No debts were imported. Check your file format.")
+                    send_whatsapp(sender_phone, "❌ No valid debts found in file.")
                 
-                return {"status": "excel_imported"}
+                return {"status": "success"}
                 
             except Exception as parse_err:
-                print(f"❌ Parse error: {str(parse_err)}")
-                send_whatsapp(sender_phone, f"❌ Error parsing file: {str(parse_err)}")
+                print(f"❌ Parse error: {parse_err}")
+                send_whatsapp(sender_phone, f"❌ File error: {parse_err}")
                 return {"status": "parse_error"}
                 
         except Exception as file_err:
