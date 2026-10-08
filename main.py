@@ -349,7 +349,7 @@ async def whatsapp_webhook(request: Request):
         if not entries:
             raise Exception("Empty entries")
             
-        except Exception as e:
+    except Exception as e:
         instructions = """❌ Ma fahmin qoraalkaaga.
 
 📖 **Fadlan soo qor:*
