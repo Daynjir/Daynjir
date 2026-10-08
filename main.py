@@ -116,7 +116,42 @@ def send_whatsapp(to_phone: str, message: str):
 @app.get("/")
 def home():
     return {"status": "Daynjir Bot Engine is running live."}
+def find_debtor_matches(shopkeeper_id, name):
+    result = (
+        supabase.table("debtors")
+        .select("*")
+        .eq("shopkeeper_id", shopkeeper_id)
+        .eq("is_paid", False)
+        .ilike("name", f"%{name.strip()}%")
+        .order("name")
+        .execute()
+    )
+    return result.data or []
 
+
+def ask_for_full_name(sender_phone, matches, action):
+    message = "⚠️ Dad isku magac ah ayaan helay:\n\n"
+
+    for number, debtor in enumerate(matches, start=1):
+        due_date = debtor.get("promised_date") or "lama gelin"
+        message += (
+            f"{number}. {debtor['name']} — "
+            f"${debtor['amount']} — Ballan: {due_date}\n"
+        )
+
+    if action == "PAY":
+        example = f"{matches[0]['name']} wuu bixiyay"
+    elif action == "DELETE":
+        example = f"delete {matches[0]['name']}"
+    else:
+        example = f"edit {matches[0]['name']} $50"
+
+    message += (
+        "\n✍️ Fadlan mar kale qor magaca oo buuxa.\n"
+        f"Tusaale: {example}"
+    )
+
+    send_whatsapp(sender_phone, message)
 
 @app.post("/webhook")
 async def whatsapp_webhook(request: Request):
@@ -434,32 +469,74 @@ async def whatsapp_webhook(request: Request):
         elif action == "PAY":
             try:
                 payment_amount = entry.get("amount")
-                
-                debtor_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").eq("is_paid", False).order("promised_date", desc=False).limit(1).execute()
-                
-                if not debtor_query.data:
+                matches = find_debtor_matches(shopkeeper_id, name)
+
+                if len(matches) == 0:
                     send_whatsapp(sender_phone, f"❌ Lama helin deynta {name}.")
-                    failed_inserts.append({"name": name, "reason": "Debtor not found"})
+                    failed_inserts.append({
+                        "name": name,
+                        "reason": "Debtor not found"
+                    })
                     continue
-                
-                debtor = debtor_query.data[0]
+
+                if len(matches) > 1:
+                    ask_for_full_name(sender_phone, matches, "PAY")
+                    continue
+
+                debtor = matches[0]
                 current_balance = float(debtor["amount"])
-                
+
                 if payment_amount is None:
-                    updated = supabase.table("debtors").update({"is_paid": True}).eq("shopkeeper_id", shopkeeper_id).eq("name", debtor["name"]).eq("amount", debtor["amount"]).execute()
-                    send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay deyntii (${current_balance}).")
+                    (
+                        supabase.table("debtors")
+                        .update({"is_paid": True})
+                        .eq("id", debtor["id"])
+                        .eq("shopkeeper_id", shopkeeper_id)
+                        .execute()
+                    )
+                    send_whatsapp(
+                        sender_phone,
+                        f"✅ {debtor['name']} wuu bixiyay deyntii (${current_balance})."
+                    )
                 else:
                     new_balance = current_balance - float(payment_amount)
+
                     if new_balance <= 0:
-                        updated = supabase.table("debtors").update({"is_paid": True, "amount": 0}).eq("shopkeeper_id", shopkeeper_id).eq("name", debtor["name"]).eq("amount", debtor["amount"]).execute()
-                        send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay deyntii oo dhan.")
+                        (
+                            supabase.table("debtors")
+                            .update({"is_paid": True, "amount": 0})
+                            .eq("id", debtor["id"])
+                            .eq("shopkeeper_id", shopkeeper_id)
+                            .execute()
+                        )
+                        send_whatsapp(
+                            sender_phone,
+                            f"✅ {debtor['name']} wuu bixiyay deyntii oo dhan."
+                        )
                     else:
-                        updated = supabase.table("debtors").update({"amount": new_balance}).eq("shopkeeper_id", shopkeeper_id).eq("name", debtor["name"]).eq("amount", debtor["amount"]).execute()
-                        send_whatsapp(sender_phone, f"✅ {name} wuu bixiyay ${payment_amount}. Haray: ${new_balance}")
-                    
+                        (
+                            supabase.table("debtors")
+                            .update({"amount": new_balance})
+                            .eq("id", debtor["id"])
+                            .eq("shopkeeper_id", shopkeeper_id)
+                            .execute()
+                        )
+                        send_whatsapp(
+                            sender_phone,
+                            f"✅ {debtor['name']} wuxuu bixiyay ${payment_amount}. "
+                            f"Haray: ${new_balance:.2f}"
+                        )
+
             except Exception as e:
-                send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
-                failed_inserts.append({"name": name, "reason": f"Payment error: {str(e)}"})
+                print(f"❌ Payment error: {e}")
+                send_whatsapp(
+                    sender_phone,
+                    "❌ Khalad ayaa dhacay marka lacagta la bixinayay."
+                )
+                failed_inserts.append({
+                    "name": name,
+                    "reason": f"Payment error: {str(e)}"
+                })
         
         elif action == "LIST":
             try:
@@ -549,67 +626,125 @@ async def whatsapp_webhook(request: Request):
                 send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
                 failed_inserts.append({"name": "LIST", "reason": f"List error: {str(e)}"})
         
-        elif action == "EDIT":
+                elif action == "EDIT":
             try:
-                # Find debtor
-                debtor_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").eq("is_paid", False).limit(1).execute()
-                
-                if not debtor_query.data:
+                matches = find_debtor_matches(shopkeeper_id, name)
+
+                if len(matches) == 0:
                     send_whatsapp(sender_phone, f"❌ Lama helin {name}.")
-                    failed_inserts.append({"name": name, "reason": "Debtor not found"})
+                    failed_inserts.append({
+                        "name": name,
+                        "reason": "Debtor not found"
+                    })
                     continue
-                
-                debtor = debtor_query.data[0]
-                
-                # Build update data
+
+                if len(matches) > 1:
+                    ask_for_full_name(sender_phone, matches, "EDIT")
+                    continue
+
+                debtor = matches[0]
+
                 update_data = {}
+
                 if new_amount is not None:
-                    update_data['amount'] = float(new_amount)
+                    update_data["amount"] = float(new_amount)
+
                 if new_date is not None:
-                    update_data['promised_date'] = new_date
-                
+                    update_data["promised_date"] = new_date
+
                 if not update_data:
-                    send_whatsapp(sender_phone, "❌ No changes specified. Use: edit [Name] $[Amount] [Date]")
-                    failed_inserts.append({"name": name, "reason": "No changes"})
+                    send_whatsapp(
+                        sender_phone,
+                        "❌ Wax isbeddel ah lama helin.\n"
+                        "Tusaale: edit Ali Hassan $50"
+                    )
+                    failed_inserts.append({
+                        "name": name,
+                        "reason": "No changes supplied"
+                    })
                     continue
-                
-                # Update
-                updated = supabase.table("debtors").update(update_data).eq("shopkeeper_id", shopkeeper_id).eq("name", debtor["name"]).eq("amount", debtor["amount"]).execute()
-                
+
+                (
+                    supabase.table("debtors")
+                    .update(update_data)
+                    .eq("id", debtor["id"])
+                    .eq("shopkeeper_id", shopkeeper_id)
+                    .execute()
+                )
+
                 changes = []
-                if 'amount' in update_data:
-                    changes.append(f"Amount: ${debtor['amount']} → ${update_data['amount']}")
-                if 'promised_date' in update_data:
-                    changes.append(f"Date: {debtor['promised_date']} → {update_data['promised_date']}")
-                
-                send_whatsapp(sender_phone, f"✅ {name} updated:\n" + "\n".join(changes))
+
+                if "amount" in update_data:
+                    changes.append(
+                        f"💵 Lacag: ${debtor['amount']} → ${update_data['amount']}"
+                    )
+
+                if "promised_date" in update_data:
+                    changes.append(
+                        f"📅 Ballan: {debtor['promised_date']} → "
+                        f"{update_data['promised_date']}"
+                    )
+
+                send_whatsapp(
+                    sender_phone,
+                    f"✅ {debtor['name']} waa la cusboonaysiiyay:\n"
+                    + "\n".join(changes)
+                )
                 successful_inserts.append(entry)
-                    
+
             except Exception as e:
-                send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
-                failed_inserts.append({"name": name, "reason": f"Edit error: {str(e)}"})
+                print(f"❌ Edit error: {e}")
+                send_whatsapp(
+                    sender_phone,
+                    "❌ Khalad ayaa dhacay marka deynta la beddelayay."
+                )
+                failed_inserts.append({
+                    "name": name,
+                    "reason": f"Edit error: {str(e)}"
+                })
         
-        elif action == "DELETE":
+                elif action == "DELETE":
             try:
-                # Find debtor
-                debtor_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").eq("is_paid", False).limit(1).execute()
-                
-                if not debtor_query.data:
+                matches = find_debtor_matches(shopkeeper_id, name)
+
+                if len(matches) == 0:
                     send_whatsapp(sender_phone, f"❌ Lama helin {name}.")
-                    failed_inserts.append({"name": name, "reason": "Debtor not found"})
+                    failed_inserts.append({
+                        "name": name,
+                        "reason": "Debtor not found"
+                    })
                     continue
-                
-                debtor = debtor_query.data[0]
-                
-                # Delete
-                deleted = supabase.table("debtors").delete().eq("shopkeeper_id", shopkeeper_id).eq("name", debtor["name"]).eq("amount", debtor["amount"]).execute()
-                
-                send_whatsapp(sender_phone, f"✅ {name} (${debtor['amount']}) has been deleted.")
+
+                if len(matches) > 1:
+                    ask_for_full_name(sender_phone, matches, "DELETE")
+                    continue
+
+                debtor = matches[0]
+
+                (
+                    supabase.table("debtors")
+                    .delete()
+                    .eq("id", debtor["id"])
+                    .eq("shopkeeper_id", shopkeeper_id)
+                    .execute()
+                )
+
+                send_whatsapp(
+                    sender_phone,
+                    f"✅ Deynta {debtor['name']} (${debtor['amount']}) waa la tirtiray."
+                )
                 successful_inserts.append(entry)
-                    
+
             except Exception as e:
-                send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
-                failed_inserts.append({"name": name, "reason": f"Delete error: {str(e)}"})
+                print(f"❌ Delete error: {e}")
+                send_whatsapp(
+                    sender_phone,
+                    "❌ Khalad ayaa dhacay marka deynta la tirtirayay."
+                )
+                failed_inserts.append({
+                    "name": name,
+                    "reason": f"Delete error: {str(e)}"
+                })
         
         elif action == "HISTORY":
             try:
