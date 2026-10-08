@@ -140,7 +140,7 @@ async def whatsapp_webhook(request: Request):
     
     message_text = ""
     
-       # ✅ HANDLE EXCEL/CSV FILES
+           # ✅ HANDLE EXCEL/CSV FILES
     if type_message == "documentMessage":
         print("📄 Excel/CSV file detected!")
         try:
@@ -170,86 +170,86 @@ async def whatsapp_webhook(request: Request):
                 else:
                     df = pd.read_excel(BytesIO(file_response.content), engine='openpyxl')
                 
-                            print(f"📊 Found {len(df)} rows in file")
-            print(f"📋 Columns: {list(df.columns)}")
-            if 'Due' in df.columns:
-                print(f"🔍 Due values: {df['Due'].tolist()}")
-            elif 'Due Date' in df.columns:
-                print(f"🔍 Due Date values: {df['Due Date'].tolist()}")
-            elif 'due_date' in df.columns:
-                print(f"🔍 due_date values: {df['due_date'].tolist()}")
-            else:
-                print("🔍 No Due column found!")
-            
-            required_cols = ['Name', 'Amount']
-            if not all(col in df.columns for col in required_cols):
-                send_whatsapp(sender_phone, "❌ File must have 'Name' and 'Amount' columns.")
-                return {"status": "missing_columns"}
-            
-            try:
-                sk_query = supabase.table("shopkeepers").select("*").eq("phone_number", sender_phone).execute()
-                if not sk_query.data:
-                    sk_insert = supabase.table("shopkeepers").insert({"phone_number": sender_phone}).execute()
-                    shopkeeper_id = sk_insert.data[0]["id"]
+                print(f"📊 Found {len(df)} rows in file")
+                print(f"📋 Columns: {list(df.columns)}")
+                if 'Due' in df.columns:
+                    print(f"🔍 Due values: {df['Due'].tolist()}")
+                elif 'Due Date' in df.columns:
+                    print(f"🔍 Due Date values: {df['Due Date'].tolist()}")
+                elif 'due_date' in df.columns:
+                    print(f"🔍 due_date values: {df['due_date'].tolist()}")
                 else:
-                    shopkeeper_id = sk_query.data[0]["id"]
-            except Exception as db_err:
-                print(f"❌ DATABASE ERROR: {db_err}")
-                send_whatsapp(sender_phone, "❌ Database error.")
-                return {"status": "shopkeeper_db_error"}
-            
-            added_count = 0
-            failed_count = 0
-            
-            for index, row in df.iterrows():
+                    print("🔍 No Due column found!")
+                
+                required_cols = ['Name', 'Amount']
+                if not all(col in df.columns for col in required_cols):
+                    send_whatsapp(sender_phone, "❌ File must have 'Name' and 'Amount' columns.")
+                    return {"status": "missing_columns"}
+                
                 try:
-                    name = str(row['Name']).strip()
-                    amount = float(row['Amount'])
-                    
-                    # FIX: Handle Excel date properly - check all column variations
-                    due_date = None
-                    due_val = None
-                    
-                    # Try all possible column names
-                    for col_name in ['Due', 'Due Date', 'due_date', 'due']:
-                        if col_name in df.columns:
-                            due_val = row[col_name]
-                            break
-                    
-                    if due_val is not None and str(due_val).strip() != 'nan' and str(due_val).strip() != '':
-                        # Check if it's a datetime object (Excel format)
-                        if hasattr(due_val, 'strftime'):
-                            due_date = due_val.strftime('%Y-%m-%d')
-                        else:
-                            # It's a string - try to parse
-                            due_str = str(due_val).strip()
-                            try:
-                                for fmt in ['%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%m/%d/%Y']:
-                                    try:
-                                        parsed_date = datetime.strptime(due_str, fmt)
-                                        due_date = parsed_date.strftime('%Y-%m-%d')
-                                        break
-                                    except:
-                                        continue
-                            except:
-                                due_date = (datetime.utcnow() + timedelta(hours=3)).date().isoformat()
+                    sk_query = supabase.table("shopkeepers").select("*").eq("phone_number", sender_phone).execute()
+                    if not sk_query.data:
+                        sk_insert = supabase.table("shopkeepers").insert({"phone_number": sender_phone}).execute()
+                        shopkeeper_id = sk_insert.data[0]["id"]
                     else:
-                        due_date = (datetime.utcnow() + timedelta(hours=3)).date().isoformat()
-                    
-                    debtor_data = {
-                        'shopkeeper_id': shopkeeper_id,
-                        'name': name,
-                        'amount': amount,
-                        'promised_date': due_date,
-                        'is_paid': False
-                    }
-                    supabase.table("debtors").insert(debtor_data).execute()
-                    added_count += 1
-                    print(f"  ✅ Added: {name} - ${amount}")
-                    
-                except Exception as row_err:
-                    print(f"  ❌ Row {index} failed: {row_err}")
-                    failed_count += 1
+                        shopkeeper_id = sk_query.data[0]["id"]
+                except Exception as db_err:
+                    print(f"❌ DATABASE ERROR: {db_err}")
+                    send_whatsapp(sender_phone, "❌ Database error.")
+                    return {"status": "shopkeeper_db_error"}
+                
+                added_count = 0
+                failed_count = 0
+                
+                for index, row in df.iterrows():
+                    try:
+                        name = str(row['Name']).strip()
+                        amount = float(row['Amount'])
+                        
+                        # FIX: Handle Excel date properly - check all column variations
+                        due_date = None
+                        due_val = None
+                        
+                        # Try all possible column names
+                        for col_name in ['Due', 'Due Date', 'due_date', 'due']:
+                            if col_name in df.columns:
+                                due_val = row[col_name]
+                                break
+                        
+                        if due_val is not None and str(due_val).strip() != 'nan' and str(due_val).strip() != '':
+                            # Check if it's a datetime object (Excel format)
+                            if hasattr(due_val, 'strftime'):
+                                due_date = due_val.strftime('%Y-%m-%d')
+                            else:
+                                # It's a string - try to parse
+                                due_str = str(due_val).strip()
+                                try:
+                                    for fmt in ['%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%m/%d/%Y']:
+                                        try:
+                                            parsed_date = datetime.strptime(due_str, fmt)
+                                            due_date = parsed_date.strftime('%Y-%m-%d')
+                                            break
+                                        except:
+                                            continue
+                                except:
+                                    due_date = (datetime.utcnow() + timedelta(hours=3)).date().isoformat()
+                        else:
+                            due_date = (datetime.utcnow() + timedelta(hours=3)).date().isoformat()
+                        
+                        debtor_data = {
+                            'shopkeeper_id': shopkeeper_id,
+                            'name': name,
+                            'amount': amount,
+                            'promised_date': due_date,
+                            'is_paid': False
+                        }
+                        supabase.table("debtors").insert(debtor_data).execute()
+                        added_count += 1
+                        print(f"  ✅ Added: {name} - ${amount}")
+                        
+                    except Exception as row_err:
+                        print(f"  ❌ Row {index} failed: {row_err}")
+                        failed_count += 1
                 
                 if added_count > 0:
                     send_whatsapp(sender_phone, f"✅ Imported {added_count} debts from Excel!\n\n📊 **Summary**:\n✅ Added: {added_count}")
