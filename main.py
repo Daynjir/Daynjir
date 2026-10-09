@@ -112,6 +112,7 @@ def send_whatsapp(to_phone: str, message: str):
     except Exception as e:
         print(f"❌ Error sending WhatsApp: {e}")
 
+OWNER_PHONE = os.getenv("OWNER_PHONE", "").lstrip("+").strip()
 
 @app.get("/")
 def home():
@@ -338,36 +339,81 @@ async def whatsapp_webhook(request: Request):
     if not message_text:
         return {"status": "empty_text"}
     
-    # ✅ CHECK IF USER IS ALREADY APPROVED
+    # Normalize sender; GREEN-API chat IDs may include "@c.us".
+    sender_phone = str(sender_phone).replace("+", "").split("@")[0].strip()
+    owner_phone = str(OWNER_PHONE).replace("+", "").split("@")[0].strip()
+
+    # Owner approves/rejects with: APPROVE 252... or REJECT 252...
+    parts = message_text.strip().split(maxsplit=1)
+    command = parts[0].upper() if parts else ""
+
+    if sender_phone == owner_phone and command in {"APPROVE", "REJECT"}:
+        if len(parts) != 2:
+            send_whatsapp(sender_phone, "Use: APPROVE 252... or REJECT 252...")
+            return {"status": "invalid_approval_command"}
+
+        applicant_phone = parts[1].replace("+", "").split("@")[0].strip()
+        new_status = "approved" if command == "APPROVE" else "rejected"
+
+        try:
+            applicant = (
+                supabase.table("shopkeepers")
+                .select("id, phone_number")
+                .eq("phone_number", applicant_phone)
+                .execute()
+            )
+
+            if not applicant.data:
+                send_whatsapp(sender_phone, f"❌ No request found for {applicant_phone}.")
+                return {"status": "applicant_not_found"}
+
+            (
+                supabase.table("shopkeepers")
+                .update({"approval_status": new_status})
+                .eq("phone_number", applicant_phone)
+                .execute()
+            )
+
+            send_whatsapp(sender_phone, f"✅ {applicant_phone} is {new_status}.")
+            send_whatsapp(
+                applicant_phone,
+                "✅ Your access is approved."
+                if new_status == "approved"
+                else "❌ Your access request was rejected."
+            )
+            return {"status": new_status}
+
+        except Exception as approval_err:
+            print(f"❌ APPROVAL UPDATE ERROR: {approval_err}")
+            send_whatsapp(sender_phone, "❌ Could not update the request. Check server logs.")
+            return {"status": "approval_update_error"}
+
+    # Find this sender's shopkeeper; do NOT auto-create unknown senders here.
     try:
-        approved_check = supabase.table("approved_users").select("*").eq("phone_number", sender_phone).execute()
-        
-        if not approved_check.data:
-            OWNER_PHONE = "252904039457"
-            
-            if sender_phone == OWNER_PHONE:
-                pass
-            else:
-                try:
-                    supabase.table("pending_users").insert({"phone_number": sender_phone}).execute()
-                except:
-                    pass
-                
-                send_whatsapp(OWNER_PHONE, f"🔔 NEW USER REQUEST:\n\nPhone: {sender_phone}\n\nAdd this number to approved_users table to allow access.")
-                send_whatsapp(sender_phone, "⏳ Your request is pending approval. Contact the owner.")
-                return {"status": "pending"}
-                
-    except Exception as auth_err:
-        print(f"❌ Authorization check failed: {auth_err}")
-    
-    # Get or create shopkeeper
-    try:
-        sk_query = supabase.table("shopkeepers").select("*").eq("phone_number", sender_phone).execute()
+        sk_query = (
+            supabase.table("shopkeepers")
+            .select("id, phone_number, approval_status")
+            .eq("phone_number", sender_phone)
+            .execute()
+        )
+
         if not sk_query.data:
-            sk_insert = supabase.table("shopkeepers").insert({"phone_number": sender_phone}).execute()
-            shopkeeper_id = sk_insert.data[0]["id"]
-        else:
-            shopkeeper_id = sk_query.data[0]["id"]
+            send_whatsapp(
+                sender_phone,
+                "⏳ You are not registered. Send JOIN to request access."
+            )
+            return {"status": "not_registered"}
+
+        shopkeeper = sk_query.data[0]
+        if shopkeeper.get("approval_status") != "approved":
+            send_whatsapp(
+                sender_phone,
+                "⏳ Your request is pending approval. Please wait for the owner."
+            )
+            return {"status": "not_approved"}
+
+        shopkeeper_id = shopkeeper["id"]
+
     except Exception as db_err:
         print(f"❌ DATABASE ERROR (Shopkeepers Lookup): {db_err}")
         return {"status": "shopkeeper_db_error"}
