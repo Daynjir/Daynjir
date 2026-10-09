@@ -112,9 +112,9 @@ PAYMENT SAFETY:
 CUSTOMER NAME EXTRACTION RULES:
 - Extract the complete customer name, including first and second names, whenever provided.
 - For HISTORY, PAY, EDIT, and DELETE, remove only command/action words; do not drop other words that may be part of the name.
-- Example: "Cali history" -> action="HISTORY", customer_name="Cali".
-- Example: "Delete Axmed" -> action="DELETE", customer_name="Axmed".
-- Example: "Cali wuxuu bixiyay $90" -> action="PAY", customer_name="Cali", amount=90.
+- Example: "Bagadh mamulka history" -> action="HISTORY", customer_name="Bagadh mamulka".
+- Example: "Delete Dhakalaf" -> action="DELETE", customer_name="Dhakalaf".
+- Example: "Bagadh mamulka wuxuu bixiyay $90" -> action="PAY", customer_name="Bagadh mamulka", amount=90.
 - Never return only the last word of a multi-word customer name when the full name appears in the message.
 
 Also support English:
@@ -299,6 +299,8 @@ def ask_for_full_name(sender_phone, matches, action):
         example = f"delete {matches[0]['name']}"
     elif action == "HISTORY":
         example = f"{matches[0]['name']} history"
+    elif action == "SEARCH":
+        example = f"Show {matches[0]['name']} debt"
     else:
         example = f"edit {matches[0]['name']} $50"
 
@@ -664,13 +666,24 @@ async def whatsapp_webhook(request: Request):
                     promised_date = datetime.utcnow().date().isoformat()
                 
                 if new_phone and not amount:
-                    debtor_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").eq("is_paid", False).limit(1).execute()
-                    if debtor_query.data:
-                        updated = supabase.table("debtors").update({"phone_number": new_phone}).eq("shopkeeper_id", shopkeeper_id).eq("name", debtor_query.data[0]["name"]).execute()
-                        send_whatsapp(sender_phone, f"✅ {name} phone number saved: {new_phone}")
-                        successful_inserts.append(entry)
+                    phone_matches = find_debtor_matches(shopkeeper_id, name)
+                    distinct_phone_names = {normalize_customer_name(d.get("name")) for d in phone_matches}
+                    if len(distinct_phone_names) > 1:
+                        ask_for_full_name(sender_phone, phone_matches, "EDIT")
+                        continue
+                    if phone_matches:
+                        matched_name = phone_matches[0]["name"]
+                        updated = (supabase.table("debtors").update({"phone_number": new_phone})
+                                   .eq("shopkeeper_id", shopkeeper_id).eq("name", matched_name).execute())
+                        if updated.data:
+                            send_whatsapp(sender_phone, f"✅ {matched_name} phone number saved: {new_phone}")
+                            successful_inserts.append(entry)
+                        else:
+                            send_whatsapp(sender_phone, f"❌ Lambarka {matched_name} lama cusboonaysiin.")
+                            failed_inserts.append({"name": name, "reason": "Phone update returned no rows"})
                         continue
                     else:
+                        send_whatsapp(sender_phone, f"❌ Lama helin qofka {name} si lambarkiisa loo kaydiyo.")
                         failed_inserts.append({"name": name, "reason": "Debtor not found for phone update"})
                         continue
                 
@@ -1044,6 +1057,38 @@ async def whatsapp_webhook(request: Request):
                     "reason": f"Delete error: {str(e)}"
                 })
         
+        elif action == "SEARCH":
+            try:
+                search_matches = find_debtor_matches(shopkeeper_id, name)
+                if not search_matches:
+                    send_whatsapp(sender_phone, f"❌ Lama helin qofka {name}. Hubi higgaadda magaca ama isku day magaciisa oo buuxa.")
+                    continue
+
+                distinct_search_names = {normalize_customer_name(d.get("name")) for d in search_matches}
+                if len(distinct_search_names) > 1:
+                    ask_for_full_name(sender_phone, search_matches, "SEARCH")
+                    continue
+
+                matched_name = search_matches[0].get("name", name)
+                total_debt = sum(float(d.get("amount") or 0) for d in search_matches if not d.get("is_paid"))
+                unpaid_count = sum(1 for d in search_matches if not d.get("is_paid"))
+                paid_count = sum(1 for d in search_matches if d.get("is_paid"))
+                lines = []
+                for i, debt in enumerate(sorted(search_matches, key=lambda d: str(d.get("created_at") or ""), reverse=True), 1):
+                    status = "✅ LA BIXIYAY" if debt.get("is_paid") else "⏳ WELI LAGUMA BIXIN"
+                    lines.append(f"{i}. ${float(debt.get('amount') or 0):.2f} — Ballan: {debt.get('promised_date') or 'lama gelin'} — {status}")
+                message = (
+                    f"🔎 *Natiijada raadinta: {matched_name}*\n\n"
+                    f"💰 Wadarta deynta harsan: *${total_debt:.2f}*\n"
+                    f"⏳ Deymo aan la bixin: {unpaid_count} | ✅ La bixiyay: {paid_count}\n\n"
+                    + "\n".join(lines)
+                )
+                send_whatsapp(sender_phone, message)
+            except Exception as e:
+                print(f"❌ Search error: {type(e).__name__}: {e}")
+                send_whatsapp(sender_phone, "❌ Khalad ayaa dhacay markii qofka la raadinayay. Fadlan mar kale isku day.")
+                failed_inserts.append({"name": name, "reason": f"Search error: {type(e).__name__}: {e}"})
+
         elif action == "HISTORY":
             try:
                 # Use the same exact/partial/fuzzy name resolver as PAY, EDIT and DELETE.
