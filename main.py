@@ -698,7 +698,8 @@ async def whatsapp_webhook(request: Request):
                                     status = " 🔴 Balanta maanta"
                                 else:
                                     status = f" 📅 {due_date}"
-                            except Exception:
+
+                            except (TypeError, ValueError):
                                 status = f" 📅 {due_date}"
 
                         debt_list.append(
@@ -730,8 +731,9 @@ async def whatsapp_webhook(request: Request):
                 )
 
                 send_whatsapp(sender_phone, message)
-            if filter_date:
-    send_due_list_followup(sender_phone)
+
+                if filter_date:
+                    send_due_list_followup(sender_phone)
 
             except Exception as e:
                 print(f"❌ List error: {e}")
