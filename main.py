@@ -1,6 +1,8 @@
 import os
 import re
 import json
+import difflib
+import unicodedata
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Request
 from supabase import create_client, Client
@@ -107,6 +109,14 @@ PAYMENT SAFETY:
 - For EDIT, use new_amount and new_date. For ADD/PAY, use amount.
 - If intent is unclear, choose SEARCH only when the user is asking about a debt; otherwise ask for clarification rather than changing data.
 
+CUSTOMER NAME EXTRACTION RULES:
+- Extract the complete customer name, including first and second names, whenever provided.
+- For HISTORY, PAY, EDIT, and DELETE, remove only command/action words; do not drop other words that may be part of the name.
+- Example: "Cali history" -> action="HISTORY", customer_name="Cali".
+- Example: "Delete Axmed" -> action="DELETE", customer_name="Axmed".
+- Example: "Cali wuxuu bixiyay $90" -> action="PAY", customer_name="Cali", amount=90.
+- Never return only the last word of a multi-word customer name when the full name appears in the message.
+
 Also support English:
 'Add debt' = ADD action
 'List debts' = LIST action
@@ -142,16 +152,135 @@ OWNER_PHONE = os.getenv("OWNER_PHONE", "").lstrip("+").strip()
 @app.get("/")
 def home():
     return {"status": "Daynjir Bot Engine is running live."}
+def normalize_customer_name(value):
+    """Normalize names for case/punctuation/spacing-insensitive comparison."""
+    value = unicodedata.normalize("NFKD", str(value or "").casefold())
+    value = "".join(ch for ch in value if not unicodedata.combining(ch))
+    value = re.sub(r"[^\w\s]", " ", value)
+    return " ".join(value.split())
+
+
+def _edit_distance(left, right):
+    """Levenshtein distance, used to tolerate small typing/spelling mistakes."""
+    previous = list(range(len(right) + 1))
+    for i, left_char in enumerate(left, 1):
+        current = [i]
+        for j, right_char in enumerate(right, 1):
+            current.append(min(
+                current[j - 1] + 1,
+                previous[j] + 1,
+                previous[j - 1] + (left_char != right_char),
+            ))
+        previous = current
+    return previous[-1]
+
+
+def _token_match_score(left, right):
+    if left == right:
+        return 1.0
+    distance = _edit_distance(left, right)
+    longest = max(len(left), len(right))
+    # Permit 1 typo for short names and up to 2 for longer names.
+    max_errors = 1 if longest <= 4 else 2
+    if distance > max_errors:
+        return 0.0
+    # Once within the allowed edit-distance window, keep the score high enough
+    # that a legitimate one-character typo (e.g. Ali/Aly) is not rejected.
+    return 0.80 + 0.20 * (1.0 - distance / max(1, longest))
+
+
+def _name_similarity(requested, stored):
+    """Score full names while allowing small spelling errors in each name part."""
+    requested_norm = normalize_customer_name(requested)
+    stored_norm = normalize_customer_name(stored)
+    if not requested_norm or not stored_norm:
+        return 0.0
+    if requested_norm == stored_norm:
+        return 1.0
+
+    requested_parts = requested_norm.split()
+    stored_parts = stored_norm.split()
+
+    # Match every supplied name part against a distinct stored name part.
+    # This prevents a shared first name alone from overriding a matching surname.
+    available = list(stored_parts)
+    part_scores = []
+    for part in requested_parts:
+        if not available:
+            return 0.0
+        best = max(range(len(available)), key=lambda i: _token_match_score(part, available[i]))
+        score = _token_match_score(part, available[best])
+        if score == 0.0:
+            return 0.0
+        part_scores.append(score)
+        available.pop(best)
+
+    # If the user provided only one part of a multi-part name, allow it as a
+    # lookup, but the caller will be shown alternatives when names are ambiguous.
+    token_score = sum(part_scores) / len(part_scores)
+    if len(requested_parts) == 1 and len(stored_parts) > 1:
+        return min(token_score, 0.88)
+
+    # A typo of one or two characters is accepted, but full-name alignment matters.
+    return 0.65 * token_score + 0.35 * difflib.SequenceMatcher(None, requested_norm, stored_norm).ratio()
+
+
 def find_debtor_matches(shopkeeper_id, name):
+    """Find exact names first, then aligned partial names, then safe fuzzy matches.
+
+    A fuzzy match is not silently selected when another distinct customer name is
+    nearly as likely; in that case all candidates are returned for clarification.
+    """
+    requested = normalize_customer_name(name)
+    if not requested:
+        return []
+
     result = (
         supabase.table("debtors")
         .select("*")
         .eq("shopkeeper_id", shopkeeper_id)
-        .ilike("name", f"%{name.strip()}%")
         .order("name")
         .execute()
     )
-    return result.data or []
+    rows = result.data or []
+    if not rows:
+        return []
+
+    # Keep each distinct spelling/name together so repeated debts for the same
+    # customer do not count as different people during name disambiguation.
+    names = {}
+    for row in rows:
+        display_name = str(row.get("name") or "").strip()
+        names.setdefault(normalize_customer_name(display_name), {"display": display_name, "rows": []})["rows"].append(row)
+
+    # Exact normalized full-name match has priority.
+    if requested in names:
+        return names[requested]["rows"]
+
+    requested_parts = requested.split()
+
+    # A supplied full name may be a typo of the stored full name. Score all names.
+    scored = []
+    for normalized, item in names.items():
+        score = _name_similarity(requested, normalized)
+        if score >= 0.72:
+            scored.append((score, normalized, item))
+
+    if not scored:
+        # Preserve substring lookup as a fallback, but don't prefer it over a
+        # plausible full-name fuzzy match.
+        partial = [item for normalized, item in names.items()
+                   if requested in normalized or normalized in requested]
+        return [row for item in partial for row in item["rows"]]
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    best_score = scored[0][0]
+    # If another distinct name is almost as close, ask the user to identify the
+    # right full name rather than risking a payment, edit, or deletion on the wrong person.
+    close = [entry for entry in scored if best_score - entry[0] <= 0.08]
+    if len(close) > 1:
+        return [row for _, _, item in close for row in item["rows"]]
+    return scored[0][2]["rows"]
 
 
 def ask_for_full_name(sender_phone, matches, action):
@@ -168,6 +297,8 @@ def ask_for_full_name(sender_phone, matches, action):
         example = f"{matches[0]['name']} wuu bixiyay"
     elif action == "DELETE":
         example = f"delete {matches[0]['name']}"
+    elif action == "HISTORY":
+        example = f"{matches[0]['name']} history"
     else:
         example = f"edit {matches[0]['name']} $50"
 
@@ -565,7 +696,7 @@ async def whatsapp_webhook(request: Request):
                 matches = find_debtor_matches(shopkeeper_id, name)
 
                 if len(matches) == 0:
-                    send_whatsapp(sender_phone, f"❌ Ma helin deynta aan weli la bixin ee {name}.")
+                    send_whatsapp(sender_phone, f"❌ Lama helin deynta aan weli la bixin ee {name}.")
                     failed_inserts.append({"name": name, "reason": "Unpaid debtor not found"})
                     continue
 
@@ -601,7 +732,7 @@ async def whatsapp_webhook(request: Request):
                         continue
 
                 if payment_amount <= 0:
-                    send_whatsapp(sender_phone, "❌ Lacag bixintu waa inay ka badan tahay $0.")
+                    send_whatsapp(sender_phone, "❌ Lacagta la bixiyay waa inay ka badan tahay $0.")
                     continue
 
                 actual_payment = min(payment_amount, current_balance)
@@ -700,13 +831,13 @@ async def whatsapp_webhook(request: Request):
                     if filter_date:
                         send_whatsapp(
                             sender_phone,
-                            f"✅ Ma jiraan deymo balantoodu tahay {filter_date}."
+                            f"✅ Ma jiraan deymo balanteedu tahay {filter_date}."
                         )
                         send_due_list_followup(sender_phone)
                     else:
                         send_whatsapp(
                             sender_phone,
-                            "✅ Ma jirto deyn aan la bixin."
+                            "✅ Ma jiraan deyn aan la bixin."
                         )
                     continue
 
@@ -915,18 +1046,21 @@ async def whatsapp_webhook(request: Request):
         
         elif action == "HISTORY":
             try:
-                # Get all debts (paid + unpaid) for this person
-                debts_query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).ilike("name", f"%{name}%").order("created_at", desc=True).execute()
-                
-                if not debts_query.data:
+                # Use the same exact/partial/fuzzy name resolver as PAY, EDIT and DELETE.
+                history_matches = find_debtor_matches(shopkeeper_id, name)
+
+                if not history_matches:
                     send_whatsapp(sender_phone, f"❌ No history found for {name}.")
+                elif len({normalize_customer_name(d.get("name")) for d in history_matches}) > 1:
+                    ask_for_full_name(sender_phone, history_matches, "HISTORY")
                 else:
+                    history_matches.sort(key=lambda d: str(d.get("created_at") or ""), reverse=True)
                     history_list = []
-                    for i, debt in enumerate(debts_query.data, 1):
+                    for i, debt in enumerate(history_matches, 1):
                         status = "✅ PAID" if debt['is_paid'] else "⏳ UNPAID"
                         history_list.append(f"{i}. {debt['name']}: ${debt['amount']} - {debt['promised_date']} [{status}]")
                     
-                    message = f"📜 *History for {name}* ({len(debts_query.data)} records):\n\n" + "\n".join(history_list)
+                    message = f"📜 *History for {history_matches[0].get('name', name)}* ({len(history_matches)} records):\n\n" + "\n".join(history_list)
                     
                     send_whatsapp(sender_phone, message)
                     
