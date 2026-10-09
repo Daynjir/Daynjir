@@ -1853,7 +1853,7 @@ async def whatsapp_webhook(request: Request):
             send_whatsapp(sender_phone, success_message)
 
     if failed_inserts:
-        error_message = f"❌ {len(failed_inserts)} deyntii ma keydsamin:\n"
+        error_message = f"❌ {len(failed_inserts)} deyntan ma keydsamin:\n"
         for fail in failed_inserts:
             error_message += f"- {fail['name']}: {fail['reason']}\n"
         send_whatsapp(sender_phone, error_message)
