@@ -298,6 +298,102 @@ def message_has_explicit_amount_for_name(message_text, customer_name):
     return False
 
 
+def local_fallback_parse(message_text):
+    """Conservatively parse common commands when Groq is unavailable.
+
+    This intentionally supports clear, single-customer commands only. It returns
+    None rather than guessing for multi-customer, ambiguous, or unsupported text.
+    """
+    raw = " ".join(str(message_text or "").strip().split())
+    if not raw:
+        return None
+    low = raw.casefold()
+
+    base = {
+        "customer_name": None, "amount": None, "days_until_due": None,
+        "customer_phone": None, "promised_date": None, "filter_date": None,
+        "filter_type": None, "new_amount": None, "new_date": None,
+        "new_phone": None, "payment_type": None,
+    }
+
+    # Clear commands that do not require natural-language interpretation.
+    if re.fullmatch(r"(?:liiska(?:\s+deynta)?|deyn(?:aha)?\s+liiskooda|list(?:\s+debts?)?)", low):
+        return [{**base, "action": "LIST"}]
+    if re.fullmatch(r"(?:export|download\s+debts?|soo\s+dejiso)", low):
+        return [{**base, "action": "EXPORT"}]
+    if re.fullmatch(r"(?:report|warbixin|bishan\s+report|monthly\s+report|weekly\s+report|todobaadkan\s+report)", low):
+        period = "week" if ("week" in low or "todobaad" in low) else ("month" if ("month" in low or "bishan" in low) else None)
+        return [{**base, "action": "REPORT", "filter_type": period}]
+
+    # Identify a single amount. Currency-marked amounts are safe; plain numbers
+    # are accepted only when transaction wording makes their meaning explicit.
+    amount_matches = list(re.finditer(r"\$\s*(\d+(?:[.,]\d{1,2})?)|(?<!\w)(\d+(?:[.,]\d{1,2})?)\s*\$", raw))
+    currency_marked = bool(amount_matches)
+    if not amount_matches:
+        if re.search(r"\b(?:iga\s+qaatay|wuxuu\s+iga\s+qaatay|qaatey|amaah|deyn\s+ah|added|add)\b", low):
+            amount_matches = list(re.finditer(r"(?<![\w/.-])(\d+(?:[.,]\d{1,2})?)(?![\w/.-])", raw))
+        elif re.search(r"\b(?:bixiyay|bixisay|paid|payment)\b", low):
+            amount_matches = list(re.finditer(r"(?<![\w/.-])(\d+(?:[.,]\d{1,2})?)(?![\w/.-])", raw))
+    # Do not guess if there are multiple amounts in a message.
+    if len(amount_matches) > 1:
+        return None
+
+    is_replace = bool(re.search(r"\b(?:edit|kadhig|ka\s+dhig|ka\s+dhigo)\b", low))
+    is_delete = bool(re.match(r"^(?:delete|remove|tirtir)\b", low))
+    is_search = bool(re.match(r"^(?:search|find|lookup|look\s+up|raadi|raadso|show|check|hubi)\b", low))
+    is_history = bool(re.search(r"\b(?:history|taariikh|statement|xisaab)\b", low))
+    is_payment = bool(re.search(r"\b(?:bixiyay|bixisay|wuu\s+bixiyay|wuxuu\s+bixiyay|paid|payment)\b", low))
+
+    if not amount_matches and not any((is_delete, is_search, is_history, is_payment)):
+        # A bare name can be searched safely only if the caller verifies it exists.
+        return None
+
+    amount = None
+    if amount_matches:
+        m = amount_matches[0]
+        amount_text = next((g for g in m.groups() if g is not None), None)
+        if amount_text is None:
+            return None
+        try:
+            amount = float(amount_text.replace(",", "."))
+        except ValueError:
+            return None
+        if amount < 0:
+            return None
+
+    # Remove amount tokens, action words and common transaction filler to recover
+    # the customer's name without allowing the parser to invent one.
+    name_text = raw
+    for m in reversed(amount_matches):
+        name_text = name_text[:m.start()] + " " + name_text[m.end():]
+    name_text = re.sub(r"\b(?:\$|usd|dollars?|ayuu|ayuu\s+iga\s+qaatay)\b", " ", name_text, flags=re.I)
+    name_text = re.sub(r"^(?:edit|add|deyn|delete|remove|tirtir|search|find|lookup|look\s+up|raadi|raadso|show|check|hubi)\b\s*[:,-]?\s*", "", name_text, flags=re.I)
+    name_text = re.sub(r"\b(?:deyntiisa|deynta|deynteeda|balance|amount)\s+(?:ka\s+dhig|kadhig|ka\s+dhigo)\b", " ", name_text, flags=re.I)
+    name_text = re.sub(r"\b(?:ka\s+dhig|kadhig|ka\s+dhigo|wuu\s+bixiyay|wuxuu\s+bixiyay|bixiyay|bixisay|paid|payment|iga\s+qaatay|wuxuu\s+iga\s+qaatay|qaatey|amaah|deyn\s+ah|deyn|added|add)\b", " ", name_text, flags=re.I)
+    name_text = re.sub(r"\b(?:history|taariikh|statement|xisaab)\b", " ", name_text, flags=re.I)
+    name_text = re.sub(r"\b(?:debt|debts|show|search|find|lookup|look\s+up|check|raadi|raadso|hubi)\b", " ", name_text, flags=re.I)
+    name_text = re.sub(r"[^\w\s'/-]", " ", name_text, flags=re.UNICODE)
+    name = " ".join(name_text.split()).strip(" -_/,")
+    if not name:
+        return None
+
+    if is_delete:
+        return [{**base, "action": "DELETE", "customer_name": name}]
+    if is_search:
+        return [{**base, "action": "SEARCH", "customer_name": name}]
+    if is_history:
+        return [{**base, "action": "HISTORY", "customer_name": name}]
+    if is_payment:
+        return [{**base, "action": "PAY", "customer_name": name, "amount": amount,
+                 "payment_type": "PARTIAL" if amount is not None else "FULL"}]
+    if amount is not None and is_replace:
+        return [{**base, "action": "EDIT", "customer_name": name,
+                 "amount": amount, "new_amount": amount}]
+    if amount is not None and (currency_marked or re.search(r"\b(?:iga\s+qaatay|wuxuu\s+iga\s+qaatay|qaatey|amaah|deyn\s+ah|added|add)\b", low)):
+        return [{**base, "action": "ADD", "customer_name": name, "amount": amount}]
+    return None
+
+
 def _edit_distance(left, right):
     """Levenshtein distance, used to tolerate small typing/spelling mistakes."""
     previous = list(range(len(right) + 1))
@@ -813,103 +909,68 @@ async def whatsapp_webhook(request: Request):
             model="openai/gpt-oss-20b",
             temperature=0.0
         )
-    except Exception as ai_err:
-        # Prevent Groq outages/rate limits from crashing the webhook request.
-        error_text = str(ai_err)
-        print(f"❌ Groq request failed: {error_text}")
-        if "429" in error_text or "rate_limit" in error_text.lower() or "RateLimitError" in type(ai_err).__name__:
-            send_whatsapp(
-                sender_phone,
-                "⏳ Adeegga AI-ga ayaa gaaray xadka isticmaalka hadda. Fadlan sug dhowr daqiiqo kadibna mar kale isku day. Deyn cusub ama lacag-bixin ha ku celin ilaa aad hubiso in la diiwaangeliyey."
-            )
-            return {"status": "groq_rate_limited"}
-        send_whatsapp(
-            sender_phone,
-            "⚠️ Waan ka xumahay, adeegga fahamka fariinta si ku-meel-gaar ah ayuu u shaqayn la'yahay. Fadlan mar kale isku day wax yar kadib."
-        )
-        return {"status": "groq_error"}
-    
-    try:
-        ai_response = chat_completion.choices[0].message.content.strip()
-    except Exception as parse_err:
-        print(f"⚠️ Direct extraction failed, casting raw string: {parse_err}")
-        ai_response = str(chat_completion).strip()
-        
-    print(f"🤖 Groq AI Processed Output: {ai_response}")
-    
-    try:
+        try:
+            ai_response = chat_completion.choices[0].message.content.strip()
+        except Exception as parse_err:
+            print(f"⚠️ Direct extraction failed, casting raw string: {parse_err}")
+            ai_response = str(chat_completion).strip()
+        print(f"🤖 Groq AI Processed Output: {ai_response}")
         json_match = re.search(r'[\[{].*[\]}]', ai_response, re.DOTALL)
         if not json_match:
-            raise Exception("No JSON found")
-        
-        clean_json = json_match.group()
-        parsed = json.loads(clean_json)
-        
-        if isinstance(parsed, dict):
-            entries = [parsed]
-        else:
-            entries = parsed
-        
+            raise ValueError("No JSON found in Groq output")
+        parsed = json.loads(json_match.group())
+        entries = [parsed] if isinstance(parsed, dict) else parsed
         if not entries:
-            raise Exception("Empty entries")
-            
-    except Exception as e:
-        # AI may return plain text or [] for a valid customer-name query (for
-        # example, "XIIS" or "Search XIIS CALI MATAAN"). Before giving up,
-        # safely try the original message as a SEARCH against this shopkeeper's
-        # own debtor records. Never use this fallback for ADD/PAY/EDIT/DELETE.
-        print(f"⚠️ AI output was not usable JSON ({e}); trying customer-search fallback")
-        raw_query = str(message_text or "").strip()
-        search_query = re.sub(
-            r"^\s*(?:search|find|show|lookup|look up|check|raadi|raadso|eeg|hubi)\b\s*[:,-]?\s*",
-            "",
-            raw_query,
-            flags=re.IGNORECASE,
-        ).strip()
-        if not search_query:
-            search_query = raw_query
-
-        fallback_matches = []
-        if search_query:
-            try:
-                fallback_matches = find_debtor_matches(shopkeeper_id, search_query)
-            except Exception as fallback_err:
-                print(f"⚠️ Customer-search fallback failed: {type(fallback_err).__name__}: {fallback_err}")
-
-        if fallback_matches:
-            print(f"🔎 AI fallback matched customer query {search_query!r}; routing to SEARCH")
-            entries = [{"action": "SEARCH", "customer_name": search_query}]
+            raise ValueError("Empty Groq entries")
+    except Exception as ai_err:
+        # Groq is optional: when rate-limited or unavailable, use conservative
+        # local rules and continue through the SAME Supabase transaction logic.
+        error_text = str(ai_err)
+        is_rate_limited = (
+            "429" in error_text or "rate_limit" in error_text.lower()
+            or "RateLimitError" in type(ai_err).__name__
+        )
+        print(f"❌ Groq request/parse failed: {error_text}")
+        entries = local_fallback_parse(message_text)
+        if entries:
+            print(f"🛟 Local fallback parsed command: {entries}")
+            print("🛟 Continuing through shared Supabase transaction logic; Groq will be tried again on the next message.")
         else:
-            instructions = """❌ Ma fahmin qoraalkaaga.
+            # A plain customer name is a safe SEARCH only if it matches this
+            # shopkeeper's own records; unsupported text must never create debt.
+            raw_query = str(message_text or "").strip()
+            has_date_words = bool(re.search(
+                r"\b(?:today|tomorrow|maanta|berri|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b|\b\d{4}-\d{1,2}-\d{1,2}\b|\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b",
+                raw_query, flags=re.I
+            ))
+            if raw_query and not has_date_words and not re.search(r"[,$]\s*\d|\d\s*\$", raw_query):
+                try:
+                    fallback_matches = find_debtor_matches(shopkeeper_id, raw_query)
+                except Exception as fallback_err:
+                    print(f"⚠️ Local customer-search fallback failed: {fallback_err}")
+                    fallback_matches = []
+                if fallback_matches:
+                    entries = [{"action": "SEARCH", "customer_name": raw_query}]
+                    print(f"🛟 Local fallback routing known customer name to SEARCH: {raw_query!r}")
+        if not entries:
+            if is_rate_limited:
+                reply = (
+                    "⏳ AI-gu wuxuu gaaray xadka isticmaalka, fariintana si ammaan ah looma fahmin.\n\n"
+                    "Fadlan isticmaal qaab cad sida: MAGACA $10, edit MAGACA $10, "
+                    "delete MAGACA, ama search MAGACA. Fariinta lama diiwaangelin."
+                )
+                send_whatsapp(sender_phone, reply)
+                return {"status": "groq_rate_limited_unparsed"}
+            send_whatsapp(
+                sender_phone,
+                "⚠️ AI-gu hadda ma shaqaynayo, fariintana si ammaan ah looma fahmin. "
+                "Fadlan isticmaal qaab cad sida MAGACA $10 ama search MAGACA. Fariinta lama diiwaangelin."
+            )
+            return {"status": "groq_error_unparsed"}
 
-📖 **Fadlan Raac Tilmaamahan:**
-
-✅ **Si aad u kaydiso deyn cusub:**
-   Qor magaca iyo lacagta
-   Tusaale: Axmed $100 balanta=beri
-
-✅ **Raadi macmiil:**
-   Search XIIS CALI MATAN
-   Ama qor magaca macmiilka oo keliya
-
-✅ **Liiska deynta:**
-   Liiska deynta
-   Balamaha maanta
-
-✅ **Deyn bixinta:**
-   Cali wuu bixiyay
-   Axmed wuxuu bixiyay $50
-
-✅ **Tirtir:**
-   delete Cali
-   remove Axmed
-
-✅ **Warbixin:**
-   Report
-"""
-            send_whatsapp(sender_phone, instructions)
-            return {"status": "parsing_failed"}
-
+    # Both Groq and local fallback use the same downstream business rules.
+    # In particular, ordinary amounts add; explicit edit/ka dhig replaces.
+    
     # Make explicit customer-search commands deterministic, like HISTORY:
     # don't depend on Groq choosing the correct action or extracting the full name.
     # HISTORY/statement wording takes priority and is never converted to SEARCH.
