@@ -755,7 +755,7 @@ async def whatsapp_webhook(request: Request):
     
     chat_completion = groq_client.chat.completions.create(
         messages=[{"role": "system", "content": dynamic_system_prompt}, {"role": "user", "content": message_text}],
-        model="openai/gpt-oss-20b",
+        model="llama-3.1-8b-instant",
         temperature=0.0
     )
     
