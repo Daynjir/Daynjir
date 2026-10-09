@@ -251,24 +251,31 @@ async def whatsapp_webhook(request: Request):
                                 due_val = row[col_name]
                                 break
                         
-                        if due_val is not None and str(due_val).strip() != 'nan' and str(due_val).strip() != '':
-                            # Check if it's a datetime object (Excel format)
-                            if hasattr(due_val, 'strftime'):
-                                due_date = due_val.strftime('%Y-%m-%d')
+                        if due_val is not None and str(due_val).strip().lower() not in ("nan", ""):
+                            if hasattr(due_val, "strftime"):
+                                due_date = due_val.strftime("%Y-%m-%d")
                             else:
-                                # It's a string - try to parse
                                 due_str = str(due_val).strip()
-                                try:
-                                    for fmt in ['%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%m/%d/%Y']:
-                                        try:
-                                            parsed_date = datetime.strptime(due_str, fmt)
-                                            due_date = parsed_date.strftime('%Y-%m-%d')
-                                            break
-                                        except:
-                                            continue
-                                except:
-                                    due_date = (datetime.utcnow() + timedelta(hours=3)).date().isoformat()
-                           else:
+                                due_date = None
+
+                                for fmt in (
+                                    "%Y-%m-%d",
+                                    "%d/%m/%Y",
+                                    "%d-%m-%Y",
+                                    "%m/%d/%Y",
+                                ):
+                                    try:
+                                        parsed_date = datetime.strptime(due_str, fmt)
+                                        due_date = parsed_date.strftime("%Y-%m-%d")
+                                        break
+                                    except ValueError:
+                                        pass
+
+                                if due_date is None:
+                                    due_date = (
+                                        datetime.utcnow() + timedelta(hours=3)
+                                    ).date().isoformat()
+                        else:
                             due_date = (
                                 datetime.utcnow() + timedelta(hours=3)
                             ).date().isoformat()
