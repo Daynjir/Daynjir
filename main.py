@@ -225,6 +225,70 @@ def _name_similarity(requested, stored):
     return 0.65 * token_score + 0.35 * difflib.SequenceMatcher(None, requested_norm, stored_norm).ratio()
 
 
+def resolve_name_from_original_message(shopkeeper_id, message_text, ai_name):
+    """Recover a complete stored debtor name when the original message contains it.
+
+    This corrects cases where the AI extracts only the first name from a full
+    name such as 'Edit Hinda bire oct 10'. It only resolves names that actually
+    appear as a complete phrase in the original message, and prefers the
+    longest phrase to avoid matching a shorter name inside a longer one.
+    """
+    if not ai_name or not message_text:
+        return None
+
+    normalized_message = f" {normalize_customer_name(message_text)} "
+    ai_norm = normalize_customer_name(ai_name)
+    if not ai_norm:
+        return None
+
+    result = (
+        supabase.table("debtors")
+        .select("name")
+        .eq("shopkeeper_id", shopkeeper_id)
+        .execute()
+    )
+    stored_names = {}
+    for row in (result.data or []):
+        display = str(row.get("name") or "").strip()
+        normalized = normalize_customer_name(display)
+        if normalized:
+            stored_names.setdefault(normalized, display)
+
+    # Only accept a name that appears as whole words in the user's original text.
+    requested_parts = normalize_customer_name(ai_name).split()
+
+    candidates = []
+    for normalized, display in stored_names.items():
+        # The stored name must appear in the message AND resemble the name
+        # extracted by the AI; this prevents another person's name in a
+        # multi-customer message from being assigned to every action.
+        if f" {normalized} " not in normalized_message:
+            continue
+        stored_parts = normalized.split()
+        has_related_token = any(
+            _token_match_score(req, stored) >= 0.78
+            for req in requested_parts
+            for stored in stored_parts
+        )
+        if has_related_token:
+            candidates.append((len(stored_parts), len(normalized), display, normalized))
+    if not candidates:
+        return None
+
+    # A full name in the text is stronger evidence than the AI's shortened name.
+    # Prefer the longest matching stored name, but don't guess between different
+    # equally-long names that both appear in the message.
+    candidates.sort(reverse=True)
+    best_size = candidates[0][:2]
+    best = [c for c in candidates if c[:2] == best_size]
+    unique_names = {c[2] for c in best}
+    if len(unique_names) == 1:
+        resolved = next(iter(unique_names))
+        print(f"🔎 Recovered full debtor name from original message: {ai_name!r} -> {resolved!r}")
+        return resolved
+    return None
+
+
 def find_debtor_matches(shopkeeper_id, name):
     """Find exact names first, then aligned partial names, then safe fuzzy matches.
 
@@ -259,19 +323,34 @@ def find_debtor_matches(shopkeeper_id, name):
 
     requested_parts = requested.split()
 
-    # A supplied full name may be a typo of the stored full name. Score all names.
+    # Prefer exact stored name tokens before fuzzy matching.
+    exact_token_matches = []
+    for normalized, item in names.items():
+        stored_parts = normalized.split()
+        if all(part in stored_parts for part in requested_parts):
+            exact_token_matches.append((len(stored_parts), normalized, item))
+    if exact_token_matches:
+        shortest_length = min(item[0] for item in exact_token_matches)
+        preferred = [item for item in exact_token_matches if item[0] == shortest_length]
+        return [row for _, _, item in preferred for row in item["rows"]]
+
+    # Next try word-boundary partial names.
+    partial = [
+        item for normalized, item in names.items()
+        if f" {requested} " in f" {normalized} " or f" {normalized} " in f" {requested} "
+    ]
+    if partial:
+        return [row for item in partial for row in item["rows"]]
+
+    # Only then consider typo-tolerant fuzzy matches.
     scored = []
     for normalized, item in names.items():
         score = _name_similarity(requested, normalized)
-        if score >= 0.72:
+        if score >= 0.78:
             scored.append((score, normalized, item))
 
     if not scored:
-        # Preserve substring lookup as a fallback, but don't prefer it over a
-        # plausible full-name fuzzy match.
-        partial = [item for normalized, item in names.items()
-                   if requested in normalized or normalized in requested]
-        return [row for item in partial for row in item["rows"]]
+        return []
 
     scored.sort(key=lambda x: x[0], reverse=True)
     best_score = scored[0][0]
@@ -324,8 +403,9 @@ async def whatsapp_webhook(request: Request):
     data = await request.json()
     print(f"📥 RAW GREEN-API WEBHOOK PAYLOAD: {json.dumps(data)}")
     
-    allowed_types = ["incomingMessageReceived", "outgoingMessageReceived"]
+    allowed_types = {"incomingMessageReceived"}
     if data.get("typeWebhook") not in allowed_types:
+        # Ignore outgoing API messages; otherwise the bot may process its own replies.
         return {"status": "ignored"}
         
     sender_data = data.get("senderData", {})
@@ -653,6 +733,18 @@ async def whatsapp_webhook(request: Request):
         payment_type = str(entry.get("payment_type") or "UNKNOWN").upper()
         filter_date = entry.get("filter_date")
         filter_type = entry.get("filter_type")
+
+        # Recover the full stored name from the original WhatsApp message if AI shortened it.
+        if name and action in {"PAY", "EDIT", "DELETE", "HISTORY", "SEARCH"}:
+            try:
+                recovered_name = resolve_name_from_original_message(
+                    shopkeeper_id, message_text, name
+                )
+                if recovered_name:
+                    name = recovered_name
+                    entry["customer_name"] = recovered_name
+            except Exception as name_err:
+                print(f"⚠️ Original-message name resolution failed: {name_err}")
         
         if not name and action not in ["LIST", "REPORT", "EXPORT"]:
             failed_inserts.append({"name": "Unknown", "reason": "No name"})
