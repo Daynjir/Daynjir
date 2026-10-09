@@ -1,6 +1,9 @@
 import os
 import re
 import json
+import csv
+import hmac
+from zoneinfo import ZoneInfo
 import difflib
 import unicodedata
 from datetime import datetime, timedelta
@@ -11,9 +14,23 @@ import requests
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
 import pandas as pd
-from io import BytesIO
+from io import BytesIO, StringIO
+from xml.sax.saxutils import escape
+
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib import colors
 
 load_dotenv()
+
+EAT = ZoneInfo("Africa/Mogadishu")
+
+def now_eat():
+    return datetime.now(EAT)
+
+def today_eat():
+    return now_eat().date()
 
 # Setup the core application framework
 app = FastAPI()
@@ -72,6 +89,7 @@ Examples - DELETE:
 Examples - HISTORY:
 'Cali history' -> [{"action": "HISTORY", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
 'Cali taariikh' -> [{"action": "HISTORY", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
+'payment history Cali' or 'statement Cali' or 'Cali xisaab' -> HISTORY for Cali
 
 Examples - REPORT:
 'Bishan report' -> [{"action": "REPORT", "customer_name": null, "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": "month", "new_amount": null, "new_date": null, "new_phone": null}]
@@ -147,7 +165,73 @@ def send_whatsapp(to_phone: str, message: str):
     except Exception as e:
         print(f"❌ Error sending WhatsApp: {e}")
 
+def send_whatsapp_file(to_phone: str, filename: str, content: bytes, mime_type: str, caption: str = ""):
+    """Send a generated file through Green-API's sendFileByUpload endpoint."""
+    clean_phone = str(to_phone).lstrip("+").split("@")[0].strip()
+    if not GREEN_API_TOKEN:
+        print("❌ GREEN_API_TOKEN is not configured; cannot send file")
+        return False
+    url = f"{GREEN_API_BASE}/waInstance{INSTANCE_ID}/sendFileByUpload/{GREEN_API_TOKEN}"
+    try:
+        response = requests.post(
+            url,
+            data={"chatId": f"{clean_phone}@c.us", "caption": caption, "fileName": filename},
+            files={"file": (filename, content, mime_type)},
+            timeout=45,
+        )
+        print(f"📎 Green-API file upload: {response.status_code} - {response.text[:500]}")
+        response.raise_for_status()
+        return True
+    except Exception as exc:
+        print(f"❌ Could not send WhatsApp file {filename}: {type(exc).__name__}: {exc}")
+        return False
+
+def build_statement_pdf(customer_name, debts, payments_by_debt, total_paid, total_balance):
+    """Build a compact PDF statement in memory; never writes customer data to disk."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+    styles = getSampleStyleSheet()
+    story = [Paragraph("Daynjir - Customer Debt Statement", styles["Title"]),
+             Paragraph(f"Customer: {escape(str(customer_name))}", styles["Heading2"]),
+             Spacer(1, 10)]
+    rows = [["Debt #", "Created", "Due date", "Current balance", "Status"]]
+    for idx, debt in enumerate(debts, 1):
+        balance = max(float(debt.get("amount") or 0), 0.0)
+        status = "Paid" if debt.get("is_paid") is True or balance <= 0 else "Unpaid"
+        rows.append([str(idx), str(debt.get("created_at") or "")[:10] or "Unknown",
+                     str(debt.get("promised_date") or "Not set"), f"${balance:.2f}", status])
+    table = Table(rows, repeatRows=1, colWidths=[42, 85, 85, 100, 70])
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8EEF5")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("PADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.extend([table, Spacer(1, 14),
+                  Paragraph(f"Recorded payments: ${total_paid:.2f}", styles["Normal"]),
+                  Paragraph(f"Current outstanding balance: ${total_balance:.2f}", styles["Heading2"]),
+                  Spacer(1, 10), Paragraph("Payment ledger", styles["Heading2"])])
+    payment_rows = [["Debt #", "Payment date", "Amount"]]
+    for idx, debt in enumerate(debts, 1):
+        for payment in payments_by_debt.get(str(debt.get("id")), []):
+            payment_rows.append([str(idx), str(payment.get("paid_at") or "")[:10] or "Unknown",
+                                 f"${float(payment.get('amount') or 0):.2f}"])
+    if len(payment_rows) == 1:
+        payment_rows.append(["-", "No payments recorded", "$0.00"])
+    pay_table = Table(payment_rows, repeatRows=1, colWidths=[70, 150, 100])
+    pay_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E8EEF5")),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.grey),
+        ("PADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(pay_table)
+    doc.build(story)
+    return buffer.getvalue()
+
 OWNER_PHONE = os.getenv("OWNER_PHONE", "").lstrip("+").strip()
+# Required for /cron/* endpoints: set a long random CRON_SECRET and send it as
+# the x-cron-secret header (or Authorization: Bearer <secret>).
 
 @app.get("/")
 def home():
@@ -401,7 +485,7 @@ def send_due_list_followup(phone):
 @app.post("/webhook")
 async def whatsapp_webhook(request: Request):
     data = await request.json()
-    print(f"📥 RAW GREEN-API WEBHOOK PAYLOAD: {json.dumps(data)}")
+    print(f"📥 Green-API webhook received: type={data.get('typeWebhook')}")
     
     allowed_types = {"incomingMessageReceived"}
     if data.get("typeWebhook") not in allowed_types:
@@ -519,11 +603,11 @@ async def whatsapp_webhook(request: Request):
 
                                 if due_date is None:
                                     due_date = (
-                                        datetime.utcnow() + timedelta(hours=3)
+                                        now_eat()
                                     ).date().isoformat()
                         else:
                             due_date = (
-                                datetime.utcnow() + timedelta(hours=3)
+                                now_eat()
                             ).date().isoformat()
 
                         starting_amount = float(amount)
@@ -655,7 +739,7 @@ async def whatsapp_webhook(request: Request):
         print(f"❌ DATABASE ERROR (Shopkeepers Lookup): {db_err}")
         return {"status": "shopkeeper_db_error"}
     
-    today_str = (datetime.utcnow() + timedelta(hours=3)).date().isoformat()
+    today_str = today_eat().isoformat()
     dynamic_system_prompt = f"{SYSTEM_PROMPT}\nToday's date is strictly: {today_str}. Use this to calculate calendar targets or relative days offsets like 'berri'."
     
     chat_completion = groq_client.chat.completions.create(
@@ -734,6 +818,36 @@ async def whatsapp_webhook(request: Request):
         filter_date = entry.get("filter_date")
         filter_type = entry.get("filter_type")
 
+        date_only_update = False
+        # If a message has a customer name + due date but NO amount, treat it as
+        # a request to update that customer's existing debt date, not create a
+        # second debt with amount 0. Example: existing debt is $4 with no due
+        # date; "C/SAMAD SANDHEERE oct 10" should update its date to Oct 10.
+        if action == "ADD" and amount is None and not new_phone:
+            date_only = promised_date
+            if not date_only and days_until_due is not None:
+                try:
+                    date_only = (today_eat() + timedelta(days=int(days_until_due))).isoformat()
+                except (TypeError, ValueError):
+                    date_only = None
+            if date_only:
+                action = "EDIT"
+                date_only_update = True
+                new_date = date_only
+                entry["action"] = "EDIT"
+                entry["new_date"] = date_only
+                print(f"🗓️ Date-only ADD converted to EDIT for {name!r}: {date_only}")
+            else:
+                send_whatsapp(
+                    sender_phone,
+                    "⚠️ Lacagta deynta lama sheegin.\n\n"
+                    "Haddii aad rabto inaad beddesho ballanta deyn hore, qor magaca iyo taariikhda.\n"
+                    "Tusaale: C/SAMAD SANDHEERE oct 10\n"
+                    "Deyn cusubna ku qor: C/SAMAD SANDHEERE $4 oct 10"
+                )
+                failed_inserts.append({"name": name or "Unknown", "reason": "Amount missing for new debt"})
+                continue
+
         # Recover the full stored name from the original WhatsApp message if AI shortened it.
         if name and action in {"PAY", "EDIT", "DELETE", "HISTORY", "SEARCH"}:
             try:
@@ -752,10 +866,13 @@ async def whatsapp_webhook(request: Request):
         
         if action == "ADD":
             try:
+                if amount is None and not new_phone:
+                    send_whatsapp(sender_phone, "⚠️ Lacagta deynta lama sheegin. Tusaale: C/SAMAD SANDHEERE $4 oct 10")
+                    failed_inserts.append({"name": name, "reason": "Amount missing for new debt"})
+                    continue
                 if not promised_date and days_until_due is not None:
-                    promised_date = (datetime.utcnow() + timedelta(days=int(days_until_due))).date().isoformat()
-                elif not promised_date:
-                    promised_date = datetime.utcnow().date().isoformat()
+                    promised_date = (today_eat() + timedelta(days=int(days_until_due))).isoformat()
+                # Keep promised_date as None when the user did not specify a due date.
                 
                 if new_phone and not amount:
                     phone_matches = find_debtor_matches(shopkeeper_id, name)
@@ -840,32 +957,33 @@ async def whatsapp_webhook(request: Request):
                     send_whatsapp(sender_phone, "❌ Lacagta la bixiyay waa inay ka badan tahay $0.")
                     continue
 
-                actual_payment = min(payment_amount, current_balance)
+                if payment_amount - current_balance > 0.009:
+                    send_whatsapp(
+                        sender_phone,
+                        f"⚠️ {debtor['name']} haraaga deyntiisu waa ${current_balance:.2f}, "
+                        f"laakiin waxaad sheegtay ${payment_amount:.2f}. Lacag-bixinta lama diiwaangelin "
+                        "si aan haraaga uga dhigin tiro taban. Hubi lacagta oo mar kale dir."
+                    )
+                    continue
+                actual_payment = round(payment_amount, 2)
                 new_balance = round(max(0.0, current_balance - actual_payment), 2)
                 is_now_paid = new_balance <= 0
 
-                # Record the payment first. If this fails, the debt balance is not changed.
-                payment_result = supabase.table("payments").insert({
-                    "debtor_id": debtor["id"],
-                    "shopkeeper_id": shopkeeper_id,
-                    "amount": actual_payment
+                # Atomically insert the payment and update the balance inside PostgreSQL.
+                # Apply the companion SQL migration file before deploying this version.
+                rpc_result = supabase.rpc("record_debt_payment", {
+                    "p_debtor_id": str(debtor["id"]),
+                    "p_shopkeeper_id": str(shopkeeper_id),
+                    "p_amount": actual_payment,
                 }).execute()
-                if not payment_result.data:
-                    raise RuntimeError("Payment insert returned no row; check payments table schema and RLS policies")
-
-                # Verify that Supabase actually updated the debtor row.
-                update_result = (
-                    supabase.table("debtors")
-                    .update({"amount": new_balance, "is_paid": is_now_paid})
-                    .eq("id", debtor["id"])
-                    .eq("shopkeeper_id", shopkeeper_id)
-                    .select("id, name, amount, is_paid")
-                    .execute()
-                )
-                if not update_result.data:
-                    raise RuntimeError("Payment was recorded but debtor balance update returned no row; check permissions/RLS")
-
-                updated_debtor = update_result.data[0]
+                rpc_data = rpc_result.data
+                if isinstance(rpc_data, list):
+                    rpc_data = rpc_data[0] if rpc_data else None
+                if not isinstance(rpc_data, dict) or not rpc_data.get("id"):
+                    raise RuntimeError("record_debt_payment returned no debt row; apply supabase_record_debt_payment.sql and check RLS")
+                updated_debtor = rpc_data
+                new_balance = float(updated_debtor.get("amount") or 0)
+                is_now_paid = bool(updated_debtor.get("is_paid")) or new_balance <= 0
                 if is_now_paid:
                     send_whatsapp(
                         sender_phone,
@@ -949,7 +1067,7 @@ async def whatsapp_webhook(request: Request):
                 debt_list = []
                 total = 0
                 overdue_count = 0
-                today = datetime.utcnow().date()
+                today = today_eat()
 
                 for index, debt in enumerate(debts_query.data, start=1):
                     debtor_name = debt["name"]
@@ -1037,7 +1155,42 @@ async def whatsapp_webhook(request: Request):
                     failed_inserts.append({"name": name, "reason": "Debtor not found"})
                     continue
 
-                if len(matches) > 1:
+                if date_only_update:
+                    # Do not select by due date if fuzzy matching returned different people.
+                    distinct_names = {normalize_customer_name(row.get("name")) for row in matches}
+                    if len(distinct_names) > 1:
+                        ask_for_full_name(sender_phone, matches, "EDIT")
+                        continue
+                    # Prefer the unique unpaid debt without a due date. Never create
+                    # a new debt for a date-only message or guess between records.
+                    undated_matches = [
+                        row for row in matches
+                        if not row.get("promised_date")
+                        and float(row.get("amount") or 0) > 0
+                        and row.get("is_paid") is not True
+                    ]
+                    if not undated_matches:
+                        # Older code assigned today's date automatically when
+                        # none was provided. Support that legacy case only when
+                        # exactly one positive, unpaid row is due today.
+                        today_str = today_eat().isoformat()
+                        legacy_today_matches = [
+                            row for row in matches
+                            if row.get("promised_date") == today_str
+                            and float(row.get("amount") or 0) > 0
+                            and row.get("is_paid") is not True
+                        ]
+                        if len(legacy_today_matches) == 1:
+                            undated_matches = legacy_today_matches
+                    if len(undated_matches) == 1:
+                        matches = undated_matches
+                    elif len(undated_matches) == 0 and len(matches) == 1 and matches[0].get("is_paid") is not True and float(matches[0].get("amount") or 0) > 0:
+                        # A single existing unpaid debt is an unambiguous target even if it already has a date.
+                        pass
+                    else:
+                        ask_for_full_name(sender_phone, matches, "EDIT")
+                        continue
+                elif len(matches) > 1:
                     ask_for_full_name(sender_phone, matches, "EDIT")
                     continue
 
@@ -1183,94 +1336,178 @@ async def whatsapp_webhook(request: Request):
 
         elif action == "HISTORY":
             try:
-                # Use the same exact/partial/fuzzy name resolver as PAY, EDIT and DELETE.
+                # Full customer statement: debt records, payment events, and current outstanding balance.
                 history_matches = find_debtor_matches(shopkeeper_id, name)
 
                 if not history_matches:
-                    send_whatsapp(sender_phone, f"❌ No history found for {name}.")
+                    send_whatsapp(sender_phone, f"❌ Taariikh looma helin macmiilka {name}.")
                 elif len({normalize_customer_name(d.get("name")) for d in history_matches}) > 1:
                     ask_for_full_name(sender_phone, history_matches, "HISTORY")
                 else:
-                    history_matches.sort(key=lambda d: str(d.get("created_at") or ""), reverse=True)
-                    history_list = []
-                    for i, debt in enumerate(history_matches, 1):
-                        status = "✅ PAID" if debt['is_paid'] else "⏳ UNPAID"
-                        history_list.append(f"{i}. {debt['name']}: ${debt['amount']} - {debt['promised_date']} [{status}]")
-                    
-                    message = f"📜 *History for {history_matches[0].get('name', name)}* ({len(history_matches)} records):\n\n" + "\n".join(history_list)
-                    
+                    history_matches.sort(key=lambda d: str(d.get("created_at") or ""))
+                    debtor_ids = [d.get("id") for d in history_matches if d.get("id") is not None]
+                    payment_rows = []
+                    if debtor_ids:
+                        payment_result = (
+                            supabase.table("payments")
+                            .select("amount, paid_at, debtor_id")
+                            .eq("shopkeeper_id", shopkeeper_id)
+                            .in_("debtor_id", debtor_ids)
+                            .order("paid_at")
+                            .execute()
+                        )
+                        payment_rows = payment_result.data or []
+
+                    payments_by_debt = {}
+                    for payment in payment_rows:
+                        payments_by_debt.setdefault(str(payment.get("debtor_id")), []).append(payment)
+
+                    lines = [f"📒 *STATEMENT / XISAABTA MACMIILKA: {history_matches[0].get('name', name)}*", ""]
+                    total_balance = 0.0
+                    total_paid = 0.0
+                    for index, debt in enumerate(history_matches, 1):
+                        balance = float(debt.get("amount") or 0)
+                        debt_paid = bool(debt.get("is_paid")) or balance <= 0
+                        total_balance += max(balance, 0.0)
+                        lines.append(
+                            f"*Deyn #{index}* — {str(debt.get('created_at') or '')[:10] or 'Taariikh lama hayo'}"
+                        )
+                        lines.append(f"  • Haraaga hadda: ${max(balance, 0.0):.2f}")
+                        due_date = debt.get("promised_date")
+                        lines.append(f"  • Ballan: {due_date if due_date else 'Lama cayimin'}")
+                        lines.append(f"  • Xaalad: {'✅ LA BIXIYAY' if debt_paid else '⏳ WELI LAGAMA BIXIN'}")
+
+                        debt_payments = payments_by_debt.get(str(debt.get("id")), [])
+                        if debt_payments:
+                            lines.append("  • Lacag-bixinnada:")
+                            for payment in debt_payments:
+                                paid_amount = float(payment.get("amount") or 0)
+                                total_paid += paid_amount
+                                paid_date = str(payment.get("paid_at") or "")[:10] or "Taariikh lama hayo"
+                                lines.append(f"    - {paid_date}: ${paid_amount:.2f}")
+                        else:
+                            lines.append("  • Lacag-bixin hore: Ma jirto")
+                        lines.append("")
+
+                    # If the same customer has several debt rows, list all associated payments.
+                    if not payment_rows:
+                        total_paid = 0.0
+                    lines.extend([
+                        "━━━━━━━━━━━━━━",
+                        f"💵 *Wadarta lacagta la bixiyay ee diiwaangashan:* ${total_paid:.2f}",
+                        f"📌 *Wadarta haraaga deynta:* ${total_balance:.2f}",
+                        "_Warbixintani waxay ku salaysan tahay diiwaannada hadda ku jira nidaamka._"
+                    ])
+                    message = "\n".join(lines)
+                    # WhatsApp has a message-size limit; trim long statements safely.
+                    if len(message) > 6000:
+                        message = message[:5850] + "\n\n… Liiska waa la soo gaabiyay; macmiilku wuxuu leeyahay diiwaanno badan."
                     send_whatsapp(sender_phone, message)
-                    
+                    try:
+                        pdf_bytes = build_statement_pdf(
+                            history_matches[0].get("name", name), history_matches,
+                            payments_by_debt, total_paid, total_balance
+                        )
+                        send_whatsapp_file(
+                            sender_phone,
+                            f"daynjir_statement_{re.sub(r'[^A-Za-z0-9_-]+', '_', str(history_matches[0].get('name', 'customer')))}.pdf",
+                            pdf_bytes,
+                            "application/pdf",
+                            "📄 Statement PDF / Xisaabta macmiilka"
+                        )
+                    except Exception as pdf_error:
+                        print(f"⚠️ PDF statement generation failed: {type(pdf_error).__name__}: {pdf_error}")
+
             except Exception as e:
-                send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
-                failed_inserts.append({"name": name, "reason": f"History error: {str(e)}"})
+                print(f"❌ Statement/history error: {type(e).__name__}: {e}")
+                send_whatsapp(sender_phone, "❌ Khalad ayaa dhacay markii la diyaarinayay statement-ka. Hubi payments table iyo permissions-ka Supabase.")
+                failed_inserts.append({"name": name, "reason": f"History error: {type(e).__name__}: {e}"})
         
         elif action == "REPORT":
             try:
-                # Get all debts
-                all_debts = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).execute()
-                
-                if not all_debts.data:
-                    send_whatsapp(sender_phone, "✅ No debts found.")
+                all_debts_result = (
+                    supabase.table("debtors").select("*")
+                    .eq("shopkeeper_id", shopkeeper_id).execute()
+                )
+                all_debts = all_debts_result.data or []
+                if not all_debts:
+                    send_whatsapp(sender_phone, "✅ Ma jiraan deymo ku jira nidaamka.")
+                    continue
+
+                today = today_eat()
+                if filter_type == "week":
+                    period_start = today - timedelta(days=today.weekday())
+                    title = "📊 Warbixinta toddobaadka"
+                elif filter_type == "month":
+                    period_start = today.replace(day=1)
+                    title = "📊 Warbixinta bisha"
                 else:
-                    total_added = sum(d['amount'] for d in all_debts.data)
-                    paid_debts = [d for d in all_debts.data if d['is_paid']]
-                    unpaid_debts = [d for d in all_debts.data if not d['is_paid']]
-                    total_paid = sum(d['amount'] for d in paid_debts)
-                    total_unpaid = sum(d['amount'] for d in unpaid_debts)
-                    
-                    if filter_type == "week":
-                        title = "📊 *Weekly Report*"
-                    elif filter_type == "month":
-                        title = "📊 *Monthly Report*"
-                    else:
-                        title = "📊 *Full Report*"
-                    
-                    message = f"""{title}
+                    period_start = today
+                    title = "📊 Warbixinta maanta"
 
-💰 **Total Added:** ${total_added:.2f}
-✅ **Total Paid:** ${total_paid:.2f}
-⏳ **Total Unpaid:** ${total_unpaid:.2f}
+                start_utc = datetime.combine(period_start, datetime.min.time(), tzinfo=EAT).astimezone(timezone.utc)
+                end_utc = datetime.combine(today + timedelta(days=1), datetime.min.time(), tzinfo=EAT).astimezone(timezone.utc)
+                start_iso = start_utc.isoformat()
+                end_iso = end_utc.isoformat()
 
-📈 **Collection Rate:** {(total_paid/total_added*100) if total_added > 0 else 0:.1f}%
+                payments_result = (
+                    supabase.table("payments").select("amount, paid_at, debtor_id")
+                    .eq("shopkeeper_id", shopkeeper_id)
+                    .gte("paid_at", start_iso).lt("paid_at", end_iso).execute()
+                )
+                period_payments = payments_result.data or []
+                new_debts = [d for d in all_debts if d.get("created_at") and start_iso <= str(d.get("created_at")) < end_iso]
+                total_outstanding = sum(max(float(d.get("amount") or 0), 0.0) for d in all_debts if d.get("is_paid") is not True)
+                period_collected = sum(float(p.get("amount") or 0) for p in period_payments)
+                overdue = [d for d in all_debts if d.get("is_paid") is not True and d.get("promised_date") and str(d.get("promised_date")) < today.isoformat()]
+                due_today = [d for d in all_debts if d.get("is_paid") is not True and d.get("promised_date") == today.isoformat()]
 
-👥 **Debtors:** {len(all_debts.data)}
-   - Paid: {len(paid_debts)}
-   - Unpaid: {len(unpaid_debts)}"""
-                    
-                    send_whatsapp(sender_phone, message)
-                    
+                message = (
+                    f"{title}\n\n"
+                    f"🆕 Diiwaanno deyn cusub ah muddadan: {len(new_debts)}\n"
+                    f"💵 Lacag la qabtay muddadan (payments table): ${period_collected:.2f}\n"
+                    f"📌 Haraaga guud ee deynta hadda: ${total_outstanding:.2f}\n"
+                    f"⚠️ Deyn ballan dhaaftay: {len(overdue)} macaamiil / ${sum(float(d.get('amount') or 0) for d in overdue):.2f}\n"
+                    f"📅 Ballan maanta: {len(due_today)} macaamiil\n\n"
+                    "Fiiro gaar ah: lacagaha la qabtay waxay ku salaysan yihiin diiwaannada payments; deymo hore oo aan lahayn diiwaan lacag-bixin waxaa laga yaabaa in taariikhdoodu dhammaystirnayn."
+                )
+                send_whatsapp(sender_phone, message)
             except Exception as e:
-                send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
-                failed_inserts.append({"name": "REPORT", "reason": f"Report error: {str(e)}"})
+                print(f"❌ Report error: {type(e).__name__}: {e}")
+                send_whatsapp(sender_phone, "❌ Warbixinta lama diyaarin. Hubi payments table iyo permissions-ka Supabase.")
+                failed_inserts.append({"name": "REPORT", "reason": str(e)})
         
         elif action == "EXPORT":
             try:
-                # Get all debts
-                all_debts = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).order("promised_date", desc=False).execute()
-                
-                if not all_debts.data:
-                    send_whatsapp(sender_phone, "✅ No debts to export.")
-                else:
-                    # Format as CSV-like text
-                    export_text = "NAME,AMOUNT,DUE DATE,PHONE,STATUS\n"
-                    for debt in all_debts.data:
-                        status = "PAID" if debt['is_paid'] else "UNPAID"
-                        phone = debt.get('phone_number') or ""
-                        export_text += f"{debt['name']},{debt['amount']},{debt['promised_date']},{phone},{status}\n"
-                    
-                    # Split into chunks (WhatsApp message limit)
-                    chunks = [export_text[i:i+1000] for i in range(0, len(export_text), 1000)]
-                    
-                    send_whatsapp(sender_phone, f"📥 **EXPORT DATA** ({len(all_debts.data)} debts):\n\n(Copy this to Excel/Sheets)\n\n")
-                    for chunk in chunks:
-                        send_whatsapp(sender_phone, f"```\n{chunk}\n```")
-                    
-                    send_whatsapp(sender_phone, f"\n✅ Export complete! Copy the data above and paste into Excel or Google Sheets.")
-                    
+                all_debts_result = (
+                    supabase.table("debtors").select("*")
+                    .eq("shopkeeper_id", shopkeeper_id)
+                    .order("promised_date", desc=False).execute()
+                )
+                debts_to_export = all_debts_result.data or []
+                if not debts_to_export:
+                    send_whatsapp(sender_phone, "✅ Ma jiraan deymo la dhoofin karo.")
+                    continue
+
+                csv_buffer = StringIO()
+                writer = csv.writer(csv_buffer)
+                writer.writerow(["Name", "Current Balance", "Due Date", "Phone", "Status", "Created At"])
+                for debt in debts_to_export:
+                    balance = max(float(debt.get("amount") or 0), 0.0)
+                    status = "PAID" if debt.get("is_paid") is True or balance <= 0 else "UNPAID"
+                    writer.writerow([debt.get("name", ""), f"{balance:.2f}", debt.get("promised_date") or "",
+                                     debt.get("phone_number") or "", status, debt.get("created_at") or ""])
+                csv_content = csv_buffer.getvalue().encode("utf-8-sig")
+                sent = send_whatsapp_file(
+                    sender_phone, f"daynjir_debts_{today_eat().isoformat()}.csv", csv_content,
+                    "text/csv", f"📥 Deymaha la dhoofiyay: {len(debts_to_export)} diiwaan"
+                )
+                if not sent:
+                    send_whatsapp(sender_phone, "❌ Faylka CSV lama dirin. Hubi Green-API sendFileByUpload iyo server logs-ka.")
             except Exception as e:
-                send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
-                failed_inserts.append({"name": "EXPORT", "reason": f"Export error: {str(e)}"})
+                print(f"❌ Export error: {type(e).__name__}: {e}")
+                send_whatsapp(sender_phone, "❌ Dhoofinta CSV way fashilantay. Hubi server logs-ka.")
+                failed_inserts.append({"name": "EXPORT", "reason": str(e)})
 
     # Send confirmation for ADD actions
     if successful_inserts:
@@ -1305,10 +1542,24 @@ async def whatsapp_webhook(request: Request):
     return {"status": "success"}
 
 
+def cron_authorized(request: Request):
+    secret = os.getenv("CRON_SECRET", "").strip()
+    if not secret:
+        # Fail closed: configure CRON_SECRET in the deployment environment.
+        return False
+    supplied = request.headers.get("x-cron-secret", "")
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        supplied = auth[7:].strip()
+    return hmac.compare_digest(supplied, secret)
+
 @app.get("/cron/daily-digest")
-async def daily_digest():
+async def daily_digest(request: Request):
+    if not cron_authorized(request):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Unauthorized cron request")
     print("🔔 DAILY DIGEST STARTED")
-    today = (datetime.utcnow() + timedelta(hours=3)).date().isoformat()
+    today = today_eat().isoformat()
     print(f"📅 Today's date: {today}")
     
     shopkeepers = supabase.table("shopkeepers").select("*").execute()
@@ -1329,9 +1580,13 @@ async def daily_digest():
         due_today = []
         for record in debt_records.data:
             print(f"  - Checking: {record['name']}, due: {record['promised_date']}")
-            if record["promised_date"] <= today:
+            due_date = record.get("promised_date")
+            if not due_date:
+                # Debts without a due date must not crash the reminder job.
+                continue
+            if str(due_date) <= today:
                 print(f"  ✅ Adding to due_today: {record['name']}")
-                due_today.append(f"• {record['name']}: ${record['amount']}")
+                due_today.append(f"• {record['name']}: ${float(record.get('amount') or 0):.2f} (ballan: {due_date})")
         
         if due_today:
             print(f"📤 Sending message to {sk_phone}")
@@ -1344,17 +1599,20 @@ async def daily_digest():
     return {"status": "done"}
   
 @app.get("/cron/evening-checkin")
-async def evening_checkin():
+async def evening_checkin(request: Request):
+    if not cron_authorized(request):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Unauthorized cron request")
     # East Africa Time is UTC+3.
-    now_eat = datetime.utcnow() + timedelta(hours=3)
-    today = now_eat.date()
+    now_eat_value = now_eat()
+    today = now_eat_value.date()
 
     # Use UTC boundaries for database timestamps.
-    start_utc = datetime(today.year, today.month, today.day) - timedelta(hours=3)
+    start_utc = datetime.combine(today, datetime.min.time(), tzinfo=EAT).astimezone(timezone.utc)
     end_utc = start_utc + timedelta(days=1)
 
-    start_iso = start_utc.isoformat() + "+00:00"
-    end_iso = end_utc.isoformat() + "+00:00"
+    start_iso = start_utc.isoformat()
+    end_iso = end_utc.isoformat()
 
     shopkeepers = supabase.table("shopkeepers").select("*").execute()
 
