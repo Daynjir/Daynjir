@@ -1077,7 +1077,8 @@ async def evening_checkin():
             lines.append("")
 
             if new_debts:
-                lines.append("🆕 *Deynta cusub ee maanta baxday:*")
+                lines.append("🆕 *Liiska Deymaha kaa baxay maanta:*")
+              
                 for debt in new_debts:
                     lines.append(
                         f"• {debt['name']}: ${float(debt['amount']):.2f}"
@@ -1111,9 +1112,9 @@ async def evening_checkin():
 
             lines.extend([
                 "",
-                "Ma jiraan deyn kale oo maanta soo xarootay "
-                "ama deyn cusub oo baxday?",
-                "Haddii ay jirto, fadlan ii soo dir magaca iyo lacagta."
+                "Hadii ay jiraan Deymo kale oo maanta soo xarooday "
+                "ama mid cusub oo baxday?",
+                "fadlan ii soo dir magaca iyo lacagta."
             ])
 
         send_whatsapp(shopkeeper_phone, "\n".join(lines))
