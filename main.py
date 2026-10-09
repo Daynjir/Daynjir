@@ -784,33 +784,80 @@ async def whatsapp_webhook(request: Request):
             raise Exception("Empty entries")
             
     except Exception as e:
-        instructions = """❌ Ma fahmin qoraalkaaga.
+        # AI may return plain text or [] for a valid customer-name query (for
+        # example, "XIIS" or "Search XIIS CALI MATAAN"). Before giving up,
+        # safely try the original message as a SEARCH against this shopkeeper's
+        # own debtor records. Never use this fallback for ADD/PAY/EDIT/DELETE.
+        print(f"⚠️ AI output was not usable JSON ({e}); trying customer-search fallback")
+        raw_query = str(message_text or "").strip()
+        search_query = re.sub(
+            r"^\s*(?:search|find|show|lookup|look up|check|raadi|raadso|eeg|hubi)\b\s*[:,-]?\s*",
+            "",
+            raw_query,
+            flags=re.IGNORECASE,
+        ).strip()
+        if not search_query:
+            search_query = raw_query
 
-📖 **Fadlan Raac Tilmaamahan:*
+        fallback_matches = []
+        if search_query:
+            try:
+                fallback_matches = find_debtor_matches(shopkeeper_id, search_query)
+            except Exception as fallback_err:
+                print(f"⚠️ Customer-search fallback failed: {type(fallback_err).__name__}: {fallback_err}")
 
-✅ **si aad u Keydiso deyn cusub:**
-   qor magaca iyo $ lacagta
-   tusaale:
-   Axmed $100 balanta=beri
+        if fallback_matches:
+            print(f"🔎 AI fallback matched customer query {search_query!r}; routing to SEARCH")
+            entries = [{"action": "SEARCH", "customer_name": search_query}]
+        else:
+            instructions = """❌ Ma fahmin qoraalkaaga.
 
-✅ **Liiska deynta:
+📖 **Fadlan Raac Tilmaamahan:**
+
+✅ **Si aad u kaydiso deyn cusub:**
+   Qor magaca iyo lacagta
+   Tusaale: Axmed $100 balanta=beri
+
+✅ **Raadi macmiil:**
+   Search XIIS CALI MATAN
+   Ama qor magaca macmiilka oo keliya
+
+✅ **Liiska deynta:**
    Liiska deynta
    Balamaha maanta
 
-✅ **Deyn bixinta:
+✅ **Deyn bixinta:**
    Cali wuu bixiyay
    Axmed wuxuu bixiyay $50
 
-✅ **Tirtir:
+✅ **Tirtir:**
    delete Cali
    remove Axmed
 
 ✅ **Warbixin:**
    Report
-  """
-        
-        send_whatsapp(sender_phone, instructions)
-        return {"status": "parsing_failed"}
+"""
+            send_whatsapp(sender_phone, instructions)
+            return {"status": "parsing_failed"}
+
+    # Make explicit customer-search commands deterministic, like HISTORY:
+    # don't depend on Groq choosing the correct action or extracting the full name.
+    # HISTORY/statement wording takes priority and is never converted to SEARCH.
+    original_text = str(message_text or "").strip()
+    lower_text = original_text.casefold()
+    is_history_request = any(word in lower_text for word in (
+        "history", "taariikh", "statement", "xisaab"
+    ))
+    search_prefix = re.match(
+        r"^\s*(?:search|find|lookup|look up|raadi|raadso)\b\s*[:,-]?\s*(.+?)\s*$",
+        original_text,
+        flags=re.IGNORECASE,
+    )
+    if search_prefix and not is_history_request:
+        explicit_search_name = search_prefix.group(1).strip()
+        if explicit_search_name:
+            print(f"🔎 Explicit search command detected; routing directly to SEARCH: {explicit_search_name!r}")
+            entries = [{"action": "SEARCH", "customer_name": explicit_search_name}]
 
     successful_inserts = []
     failed_inserts = []
