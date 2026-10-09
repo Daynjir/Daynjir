@@ -244,6 +244,60 @@ def normalize_customer_name(value):
     return " ".join(value.split())
 
 
+def message_has_explicit_amount_for_name(message_text, customer_name):
+    """Return whether the user's own message states an amount for this name.
+
+    This guards against the AI copying a stored balance into an ADD result when
+    the user actually sent only a due-date update. Currency-marked values are
+    strongest evidence; plain numbers are accepted after date expressions are
+    removed (e.g. 'Jaamac 60 ayuu iga qaatay').
+    """
+    requested = normalize_customer_name(customer_name)
+    if not requested:
+        return False
+
+    raw = str(message_text or "")
+    segments = [part.strip() for part in re.split(r"[\n;,|]+", raw) if part.strip()]
+    if not segments:
+        segments = [raw]
+
+    month_pattern = (
+        r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
+        r"jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|"
+        r"nov(?:ember)?|dec(?:ember)?|january|february|march|april|june|july|"
+        r"august|september|october|november|december"
+    )
+    for segment in segments:
+        normalized_segment = normalize_customer_name(segment)
+        if requested not in normalized_segment:
+            # AI may shorten a stored full name; require at least one meaningful
+            # name token to be present in the source segment before trusting it.
+            requested_tokens = requested.split()
+            if not any(len(token) >= 3 and token in normalized_segment.split() for token in requested_tokens):
+                continue
+
+        # Remove dates before looking for unmarked numbers, so "Name Oct 10"
+        # doesn't accidentally look like a $10 debt.
+        cleaned = re.sub(r"\b\d{4}-\d{1,2}-\d{1,2}\b", " ", segment, flags=re.I)
+        cleaned = re.sub(r"\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b", " ", cleaned)
+        cleaned = re.sub(rf"\b(?:{month_pattern})\s+\d{{1,2}}(?:st|nd|rd|th)?\b", " DATE ", cleaned, flags=re.I)
+        cleaned = re.sub(rf"\b\d{{1,2}}(?:st|nd|rd|th)?\s+(?:{month_pattern})\b", " DATE ", cleaned, flags=re.I)
+
+        # Explicit currency formats are unambiguous.
+        if re.search(r"(?:\$\s*\d+(?:[.,]\d+)?|\d+(?:[.,]\d+)?\s*\$|\b(?:usd|dollars?|dollar)\b)", cleaned, flags=re.I):
+            return True
+
+        # Common Somali/English transaction wording is also amount evidence.
+        if re.search(r"\b(?:iga\s+qaatay|qaatey|amaah|deyn|deyn\s+ah|wuxuu\s+iga\s+qaatay|added|add)\b", cleaned, flags=re.I) and re.search(r"\d+(?:[.,]\d+)?", cleaned):
+            return True
+
+        # Bare numbers are allowed as amounts only when not part of a date.
+        if re.search(r"\d+(?:[.,]\d+)?", cleaned) and not re.search(r"\b(?:today|tomorrow|berri|maanta|oct|nov|dec|jan|feb|mar|apr|may|jun|jul|aug|sep)\b", cleaned, flags=re.I):
+            return True
+
+    return False
+
+
 def _edit_distance(left, right):
     """Levenshtein distance, used to tolerate small typing/spelling mistakes."""
     previous = list(range(len(right) + 1))
@@ -485,19 +539,10 @@ def ask_for_full_name(sender_phone, matches, action):
 
     send_whatsapp(sender_phone, message)
   
-from collections import defaultdict
-
-due_list_followup_counts = defaultdict(int)
-
 def send_due_list_followup(phone):
-    due_list_followup_counts[phone] += 1
-
-    if due_list_followup_counts[phone] % 5 != 0:
-        return
-
     send_whatsapp(
         phone,
-        "haddii aad u baahan tahay liiska deynta oo dhan soo qor:\n"
+        "Si aad u eegto liiska deynta oo dhan soo qor:\n"
         "Liiska daynta\n"
         "ama\n"
         "Liiska daynta iyo balamaha"
@@ -741,7 +786,7 @@ async def whatsapp_webhook(request: Request):
         if not sk_query.data:
             send_whatsapp(
                 sender_phone,
-                "⏳ Weli isma aadan diwaan gelinin. soo qor JOIN si laguu aqbalo."
+                "⏳ You are not registered. Send JOIN to request access."
             )
             return {"status": "not_registered"}
 
@@ -749,7 +794,7 @@ async def whatsapp_webhook(request: Request):
         if shopkeeper.get("approval_status") != "approved":
             send_whatsapp(
                 sender_phone,
-                "⏳ codsigaaga waa la diray. fadlan sug jawaabta."
+                "⏳ Your request is pending approval. Please wait for the owner."
             )
             return {"status": "not_approved"}
 
@@ -762,11 +807,27 @@ async def whatsapp_webhook(request: Request):
     today_str = today_eat().isoformat()
     dynamic_system_prompt = f"{SYSTEM_PROMPT}\nToday's date is strictly: {today_str}. Use this to calculate calendar targets or relative days offsets like 'berri'."
     
-    chat_completion = groq_client.chat.completions.create(
-        messages=[{"role": "system", "content": dynamic_system_prompt}, {"role": "user", "content": message_text}],
-        model="openai/gpt-oss-120b",
-        temperature=0.0
-    )
+    try:
+        chat_completion = groq_client.chat.completions.create(
+            messages=[{"role": "system", "content": dynamic_system_prompt}, {"role": "user", "content": message_text}],
+            model="openai/gpt-oss-20b",
+            temperature=0.0
+        )
+    except Exception as ai_err:
+        # Prevent Groq outages/rate limits from crashing the webhook request.
+        error_text = str(ai_err)
+        print(f"❌ Groq request failed: {error_text}")
+        if "429" in error_text or "rate_limit" in error_text.lower() or "RateLimitError" in type(ai_err).__name__:
+            send_whatsapp(
+                sender_phone,
+                "⏳ Adeegga AI-ga ayaa gaaray xadka isticmaalka hadda. Fadlan sug dhowr daqiiqo kadibna mar kale isku day. Deyn cusub ama lacag-bixin ha ku celin ilaa aad hubiso in la diiwaangeliyey."
+            )
+            return {"status": "groq_rate_limited"}
+        send_whatsapp(
+            sender_phone,
+            "⚠️ Waan ka xumahay, adeegga fahamka fariinta si ku-meel-gaar ah ayuu u shaqayn la'yahay. Fadlan mar kale isku day wax yar kadib."
+        )
+        return {"status": "groq_error"}
     
     try:
         ai_response = chat_completion.choices[0].message.content.strip()
@@ -828,7 +889,7 @@ async def whatsapp_webhook(request: Request):
    Tusaale: Axmed $100 balanta=beri
 
 ✅ **Raadi macmiil:**
-   Search kadib magaca macmiilka
+   Search XIIS CALI MATAN
    Ama qor magaca macmiilka oo keliya
 
 ✅ **Liiska deynta:**
@@ -868,6 +929,36 @@ async def whatsapp_webhook(request: Request):
             print(f"🔎 Explicit search command detected; routing directly to SEARCH: {explicit_search_name!r}")
             entries = [{"action": "SEARCH", "customer_name": explicit_search_name}]
 
+    # Deterministic amount semantics: ordinary "Name $10" means ADD $10 to
+    # the existing active debt if one exists; explicit EDIT / "ka dhig" means
+    # replace the balance instead. Do not leave this decision to the AI model.
+    explicit_replace_amount = bool(re.search(
+        r"(?:^\s*(?:edit|kadhig|ka\s+dhig|ka\s+dhigo)\b|\bka\s+dhig(?:\s|$)|\bkadhig(?:\s|$))",
+        original_text,
+        flags=re.IGNORECASE,
+    ))
+    if explicit_replace_amount and not is_history_request and not search_prefix:
+        for parsed_entry in entries:
+            if parsed_entry.get("action") in {"ADD", "EDIT"}:
+                source_has_amount_for_entry = message_has_explicit_amount_for_name(
+                    original_text, parsed_entry.get("customer_name")
+                )
+                if (
+                    parsed_entry.get("new_amount") is None
+                    and parsed_entry.get("amount") is not None
+                    and source_has_amount_for_entry
+                ):
+                    parsed_entry["new_amount"] = parsed_entry.get("amount")
+                elif not source_has_amount_for_entry:
+                    # Do not let a guessed/copied amount overwrite a balance
+                    # when the user's explicit edit only names a date or person.
+                    parsed_entry["amount"] = None
+                    parsed_entry["new_amount"] = None
+                if parsed_entry.get("new_date") is None and parsed_entry.get("promised_date") is not None:
+                    parsed_entry["new_date"] = parsed_entry.get("promised_date")
+                parsed_entry["action"] = "EDIT"
+                print(f"✏️ Explicit edit/ka dhig wording detected; replacing fields for {parsed_entry.get('customer_name')!r}")
+
     successful_inserts = []
     failed_inserts = []
     
@@ -890,7 +981,20 @@ async def whatsapp_webhook(request: Request):
         # a request to update that customer's existing debt date, not create a
         # second debt with amount 0. Example: existing debt is $4 with no due
         # date; "C/SAMAD SANDHEERE oct 10" should update its date to Oct 10.
-        if action == "ADD" and amount is None and not new_phone:
+        source_has_amount = message_has_explicit_amount_for_name(message_text, name) if name else False
+        if action == "ADD" and amount is not None and not source_has_amount and not new_phone:
+            # The model may hallucinate/copy a balance not present in the user's
+            # message. Never apply that amount as a financial transaction.
+            print(f"⚠️ Ignoring AI amount not present in source message for {name!r}: {amount!r}")
+            amount = None
+            entry["amount"] = None
+        # If the user gave a due date but no amount in their own message, treat
+        # this as a date-only edit even if the AI hallucinated/copied an amount.
+        date_intent_without_amount = (
+            (promised_date is not None or days_until_due is not None)
+            and not source_has_amount
+        )
+        if action == "ADD" and not new_phone and (amount is None or date_intent_without_amount):
             date_only = promised_date
             if not date_only and days_until_due is not None:
                 try:
@@ -901,16 +1005,23 @@ async def whatsapp_webhook(request: Request):
                 action = "EDIT"
                 date_only_update = True
                 new_date = date_only
+                # Ignore any amount the AI may have copied/inferred; the source
+                # message did not state one, so this operation must change only
+                # the due date and must preserve the existing balance.
+                amount = None
+                new_amount = None
+                entry["amount"] = None
+                entry["new_amount"] = None
                 entry["action"] = "EDIT"
                 entry["new_date"] = date_only
-                print(f"🗓️ Date-only ADD converted to EDIT for {name!r}: {date_only}")
+                print(f"🗓️ Date-only ADD converted to EDIT for {name!r}: {date_only} (amount preserved)")
             else:
                 send_whatsapp(
                     sender_phone,
                     "⚠️ Lacagta deynta lama sheegin.\n\n"
                     "Haddii aad rabto inaad beddesho ballanta deyn hore, qor magaca iyo taariikhda.\n"
-                    "Tusaale: Cali oct 10\n"
-                    "Deyn cusubna ku qor: faarax $40 oct 10"
+                    "Tusaale: C/SAMAD SANDHEERE oct 10\n"
+                    "Deyn cusubna ku qor: C/SAMAD SANDHEERE $4 oct 10"
                 )
                 failed_inserts.append({"name": name or "Unknown", "reason": "Amount missing for new debt"})
                 continue
@@ -934,10 +1045,7 @@ async def whatsapp_webhook(request: Request):
         if action == "ADD":
             try:
                 if amount is None and not new_phone:
-                    send_whatsapp(
-    sender_phone,
-    "⚠️ Ma cadda cadadka deynta, fadlan xaqiiji."
-)
+                    send_whatsapp(sender_phone, "⚠️ Lacagta deynta lama sheegin. Tusaale: C/SAMAD SANDHEERE $4 oct 10")
                     failed_inserts.append({"name": name, "reason": "Amount missing for new debt"})
                     continue
                 if not promised_date and days_until_due is not None:
@@ -966,16 +1074,96 @@ async def whatsapp_webhook(request: Request):
                         failed_inserts.append({"name": name, "reason": "Debtor not found for phone update"})
                         continue
                 
+                # Amounts without an explicit EDIT / "ka dhig" are additive.
+                # If this customer already has exactly one active debt, update
+                # that row instead of creating a duplicate debtor/debt record.
+                # If the name is ambiguous or multiple active rows exist, ask
+                # the user rather than changing the wrong balance.
+                if amount is not None and not new_phone:
+                    matches = find_debtor_matches(shopkeeper_id, name)
+                    distinct_names = {normalize_customer_name(row.get("name")) for row in matches}
+                    if len(distinct_names) > 1:
+                        ask_for_full_name(sender_phone, matches, "EDIT")
+                        continue
+
+                    active_matches = [
+                        row for row in matches
+                        if row.get("is_paid") is not True and float(row.get("amount") or 0) > 0
+                    ]
+                    if len(active_matches) > 1:
+                        ask_for_full_name(sender_phone, active_matches, "EDIT")
+                        continue
+
+                    if len(active_matches) == 1:
+                        existing = active_matches[0]
+                        try:
+                            add_amount = float(amount)
+                        except (TypeError, ValueError):
+                            send_whatsapp(sender_phone, "❌ Lacagta lagu darayo ma saxna.")
+                            failed_inserts.append({"name": name, "reason": "Invalid additive amount"})
+                            continue
+                        if add_amount <= 0:
+                            send_whatsapp(sender_phone, "❌ Lacagta lagu darayo waa inay ka badan tahay $0.")
+                            failed_inserts.append({"name": name, "reason": "Additive amount must be positive"})
+                            continue
+
+                        old_amount = float(existing.get("amount") or 0)
+                        update_data = {"amount": round(old_amount + add_amount, 2), "is_paid": False}
+                        if promised_date:
+                            try:
+                                update_data["promised_date"] = datetime.strptime(str(promised_date), "%Y-%m-%d").date().isoformat()
+                            except (TypeError, ValueError):
+                                send_whatsapp(sender_phone, "❌ Taariikh khaldan. Isticmaal YYYY-MM-DD.")
+                                continue
+                        if new_phone:
+                            update_data["phone_number"] = new_phone
+
+                        updated_result = (
+                            supabase.table("debtors")
+                            .update(update_data)
+                            .eq("id", existing["id"])
+                            .eq("shopkeeper_id", shopkeeper_id)
+                            .select("id, name, amount, promised_date, is_paid")
+                            .execute()
+                        )
+                        if not updated_result.data:
+                            send_whatsapp(sender_phone, "❌ Lacagta laguma darin. Database-ku wax jawaab ah ma soo celin.")
+                            failed_inserts.append({"name": name, "reason": "Add-to-existing update returned no rows"})
+                            continue
+
+                        updated = updated_result.data[0]
+                        send_whatsapp(
+                            sender_phone,
+                            f"✅ Lacag ayaa lagu daray deyntii hore!\n\n"
+                            f"👤 Macmiilka: {updated['name']}\n"
+                            f"➕ Lacag lagu daray: ${add_amount:.2f}\n"
+                            f"💵 Deynta cusub: ${float(updated.get('amount') or 0):.2f}\n"
+                            f"📅 Ballanta: {updated.get('promised_date') or 'lama gelin'}"
+                        )
+                        entry["action"] = "ADJUST"
+                        successful_inserts.append(entry)
+                        continue
+
+                    # If matching records exist but all are paid, start a new
+                    # debt row using the canonical stored spelling.
+                    if matches:
+                        name = matches[0].get("name") or name
+                        entry["customer_name"] = name
+
                 debtor_data = {
                     'shopkeeper_id': shopkeeper_id,
                     'name': name,
-                    'amount': float(amount) if amount else 0,
+                    'amount': float(amount) if amount is not None else 0,
                     'promised_date': promised_date,
                     'phone_number': new_phone if new_phone else None,
                     'is_paid': False
                 }
-                
+
                 result = supabase.table("debtors").insert(debtor_data).execute()
+                if not result.data:
+                    send_whatsapp(sender_phone, f"❌ Deynta {name} lama diiwaangelin. Database-ku wax jawaab ah ma soo celin.")
+                    failed_inserts.append({"name": name, "reason": "Insert returned no rows"})
+                    continue
                 successful_inserts.append(entry)
                 
             except Exception as e:
@@ -1020,7 +1208,7 @@ async def whatsapp_webhook(request: Request):
                     try:
                         payment_amount = float(payment_amount)
                     except (TypeError, ValueError):
-                        send_whatsapp(sender_phone, "❌ cadadka Lacagta ma fahmin.")
+                        send_whatsapp(sender_phone, "❌ Lacagta ma fahmin. Tusaale: Cali ka jar $10.")
                         continue
 
                 if payment_amount <= 0:
@@ -1031,7 +1219,7 @@ async def whatsapp_webhook(request: Request):
                     send_whatsapp(
                         sender_phone,
                         f"⚠️ {debtor['name']} haraaga deyntiisu waa ${current_balance:.2f}, "
-                        f"laakiin waxaad sheegtay ${payment_amount:.2f}. Lacag-bixintan lama diiwaangelin "
+                        f"laakiin waxaad sheegtay ${payment_amount:.2f}. Lacag-bixinta lama diiwaangelin "
                         "si aan haraaga uga dhigin tiro taban. Hubi lacagta oo mar kale dir."
                     )
                     continue
@@ -1124,13 +1312,13 @@ async def whatsapp_webhook(request: Request):
                     if filter_date:
                         send_whatsapp(
                             sender_phone,
-                            f"✅ Ma jiraan deymo balantoodu tahay {filter_date}."
+                            f"✅ Ma jiraan deymo balanteedu tahay {filter_date}."
                         )
                         send_due_list_followup(sender_phone)
                     else:
                         send_whatsapp(
                             sender_phone,
-                            "✅ Ma jirto deyn aan la bixin."
+                            "✅ Ma jiraan deyn aan la bixin."
                         )
                     continue
 
@@ -1191,7 +1379,7 @@ async def whatsapp_webhook(request: Request):
 
                 if wants_due_dates and overdue_count > 0:
                     message = (
-                        f"⚠️ {overdue_count} deymaha balandhaafka ah:\n\n"
+                        f"⚠️ {overdue_count} deyn balan dhaafay:\n\n"
                         + message
                     )
 
@@ -1221,7 +1409,7 @@ async def whatsapp_webhook(request: Request):
                 matches = find_debtor_matches(shopkeeper_id, name)
 
                 if len(matches) == 0:
-                    send_whatsapp(sender_phone, f"❌ ma helin deyn aan weli la bixin oo ku qoran {name}.")
+                    send_whatsapp(sender_phone, f"❌ Lama helin deynta aan weli la bixin ee {name}.")
                     failed_inserts.append({"name": name, "reason": "Debtor not found"})
                     continue
 
@@ -1294,7 +1482,9 @@ async def whatsapp_webhook(request: Request):
                 if not update_data:
                     send_whatsapp(
                         sender_phone,
-                        "❌ Ma diwaan gelin lacag ama taariikh cusub.\n"
+                        "❌ Ma helin lacag ama taariikh cusub.\n"
+                        "Tusaale: Cali deyntiisa ka dhig $50\n"
+                        "Ama: Cali balantiisa ka dhig 2026-10-20"
                     )
                     failed_inserts.append({"name": name, "reason": "No changes supplied"})
                     continue
@@ -1388,7 +1578,7 @@ async def whatsapp_webhook(request: Request):
                 paid_count = sum(1 for d in search_matches if d.get("is_paid"))
                 lines = []
                 for i, debt in enumerate(sorted(search_matches, key=lambda d: str(d.get("created_at") or ""), reverse=True), 1):
-                    status = "✅ LA BIXIYAY" if debt.get("is_paid") else "⏳ WELI LAMA BIXIN"
+                    status = "✅ LA BIXIYAY" if debt.get("is_paid") else "⏳ WELI LAGUMA BIXIN"
                     lines.append(f"{i}. ${float(debt.get('amount') or 0):.2f} — Ballan: {debt.get('promised_date') or 'lama gelin'} — {status}")
                 message = (
                     f"🔎 *Natiijada raadinta: {matched_name}*\n\n"
@@ -1399,7 +1589,7 @@ async def whatsapp_webhook(request: Request):
                 send_whatsapp(sender_phone, message)
             except Exception as e:
                 print(f"❌ Search error: {type(e).__name__}: {e}")
-                send_whatsapp(sender_phone, "❌ Khalad ayaa dhacay markii aan magacan la raadinayay. Fadlan mar kale isku day.")
+                send_whatsapp(sender_phone, "❌ Khalad ayaa dhacay markii qofka la raadinayay. Fadlan mar kale isku day.")
                 failed_inserts.append({"name": name, "reason": f"Search error: {type(e).__name__}: {e}"})
 
         elif action == "HISTORY":
@@ -1408,7 +1598,7 @@ async def whatsapp_webhook(request: Request):
                 history_matches = find_debtor_matches(shopkeeper_id, name)
 
                 if not history_matches:
-                    send_whatsapp(sender_phone, f"❌ macmiilkan malaha dhaqdhaqaaq {name}.")
+                    send_whatsapp(sender_phone, f"❌ Taariikh looma helin macmiilka {name}.")
                 elif len({normalize_customer_name(d.get("name")) for d in history_matches}) > 1:
                     ask_for_full_name(sender_phone, history_matches, "HISTORY")
                 else:
@@ -1463,7 +1653,7 @@ async def whatsapp_webhook(request: Request):
                     lines.extend([
                         "━━━━━━━━━━━━━━",
                         f"💵 *Wadarta lacagta la bixiyay ee diiwaangashan:* ${total_paid:.2f}",
-                        f"📌 *Wadarta hadhaaga deynta:* ${total_balance:.2f}",
+                        f"📌 *Wadarta haraaga deynta:* ${total_balance:.2f}",
                         "_Warbixintani waxay ku salaysan tahay diiwaannada hadda ku jira nidaamka._"
                     ])
                     message = "\n".join(lines)
@@ -1488,7 +1678,7 @@ async def whatsapp_webhook(request: Request):
 
             except Exception as e:
                 print(f"❌ Statement/history error: {type(e).__name__}: {e}")
-                send_whatsapp(sender_phone, "❌ Khalad ayaa dhacay markii la diyaarinayay statement-ka. Hubi payments table iyo permissions-ka.")
+                send_whatsapp(sender_phone, "❌ Khalad ayaa dhacay markii la diyaarinayay statement-ka. Hubi payments table iyo permissions-ka Supabase.")
                 failed_inserts.append({"name": name, "reason": f"History error: {type(e).__name__}: {e}"})
         
         elif action == "REPORT":
@@ -1542,7 +1732,7 @@ async def whatsapp_webhook(request: Request):
                 send_whatsapp(sender_phone, message)
             except Exception as e:
                 print(f"❌ Report error: {type(e).__name__}: {e}")
-                send_whatsapp(sender_phone, "❌ Warbixinta lama diyaarin. Hubi payments table iyo permissions-ka.")
+                send_whatsapp(sender_phone, "❌ Warbixinta lama diyaarin. Hubi payments table iyo permissions-ka Supabase.")
                 failed_inserts.append({"name": "REPORT", "reason": str(e)})
         
         elif action == "EXPORT":
@@ -1554,7 +1744,7 @@ async def whatsapp_webhook(request: Request):
                 )
                 debts_to_export = all_debts_result.data or []
                 if not debts_to_export:
-                    send_whatsapp(sender_phone, "✅ Ma jiraan deymo la soo saari karo.")
+                    send_whatsapp(sender_phone, "✅ Ma jiraan deymo la dhoofin karo.")
                     continue
 
                 csv_buffer = StringIO()
@@ -1571,10 +1761,10 @@ async def whatsapp_webhook(request: Request):
                     "text/csv", f"📥 Deymaha la dhoofiyay: {len(debts_to_export)} diiwaan"
                 )
                 if not sent:
-                    send_whatsapp(sender_phone, "❌ Faylka CSV lama dirin.")
+                    send_whatsapp(sender_phone, "❌ Faylka CSV lama dirin. Hubi Green-API sendFileByUpload iyo server logs-ka.")
             except Exception as e:
                 print(f"❌ Export error: {type(e).__name__}: {e}")
-                send_whatsapp(sender_phone, "❌ Dhoofinta CSV way fashilantay.")
+                send_whatsapp(sender_phone, "❌ Dhoofinta CSV way fashilantay. Hubi server logs-ka.")
                 failed_inserts.append({"name": "EXPORT", "reason": str(e)})
 
     # Send confirmation for ADD actions
@@ -1731,7 +1921,7 @@ async def evening_checkin(request: Request):
 
             if payments:
                 lines.append("")
-                lines.append("💵 *Daymaha maanta kuusoo xarooday:*")
+                lines.append("💵 *Daynta maanta kuusoo xarootay:*")
 
                 for payment in payments:
                     debtor_result = (
