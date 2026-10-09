@@ -1024,7 +1024,102 @@ async def daily_digest():
             
     print("✅ DAILY DIGEST COMPLETED")
     return {"status": "done"}
+  
+@app.get("/cron/evening-checkin")
+async def evening_checkin():
+    # East Africa Time is UTC+3.
+    now_eat = datetime.utcnow() + timedelta(hours=3)
+    today = now_eat.date()
 
+    # Use UTC boundaries for database timestamps.
+    start_utc = datetime(today.year, today.month, today.day) - timedelta(hours=3)
+    end_utc = start_utc + timedelta(days=1)
+
+    start_iso = start_utc.isoformat() + "+00:00"
+    end_iso = end_utc.isoformat() + "+00:00"
+
+    shopkeepers = supabase.table("shopkeepers").select("*").execute()
+
+    for shopkeeper in shopkeepers.data or []:
+        shopkeeper_id = shopkeeper["id"]
+        shopkeeper_phone = shopkeeper["phone_number"]
+
+        # Debts newly recorded today.
+        new_debts_result = (
+            supabase.table("debtors")
+            .select("name, amount, created_at")
+            .eq("shopkeeper_id", shopkeeper_id)
+            .gte("created_at", start_iso)
+            .lt("created_at", end_iso)
+            .execute()
+        )
+        new_debts = new_debts_result.data or []
+
+        # Payments recorded today.
+        payments_result = (
+            supabase.table("payments")
+            .select("amount, paid_at, debtor_id")
+            .eq("shopkeeper_id", shopkeeper_id)
+            .gte("paid_at", start_iso)
+            .lt("paid_at", end_iso)
+            .execute()
+        )
+        payments = payments_result.data or []
+
+        lines = ["🌙 *Natiijada maanta*"]
+
+        if not new_debts and not payments:
+            lines.extend([
+                "",
+                "Maanta maxaa Deyn soo xarooday, maxaase kaa baxay?",
+                """
+            ])
+        else:
+            lines.append("")
+
+            if new_debts:
+                lines.append("🆕 *Deynta cusub ee maanta baxday:*")
+                for debt in new_debts:
+                    lines.append(
+                        f"• {debt['name']}: ${float(debt['amount']):.2f}"
+                    )
+
+
+            if payments:
+                lines.append("")
+                lines.append("💵 *Daynta maanta kuusoo xarootay:*")
+
+                for payment in payments:
+                    debtor_result = (
+                        supabase.table("debtors")
+                        .select("name")
+                        .eq("id", payment["debtor_id"])
+                        .eq("shopkeeper_id", shopkeeper_id)
+                        .limit(1)
+                        .execute()
+                    )
+                    debtor_name = (
+                        debtor_result.data[0]["name"]
+                        if debtor_result.data
+                        else "Macmiil"
+                    )
+                    lines.append(
+                        f"• {debtor_name}: ${float(payment['amount']):.2f}"
+                    )
+            else:
+                lines.append("")
+                lines.append("💵 Ma jirto lacag-bixin la diiwaangeliyay maanta.")
+
+            lines.extend([
+                "",
+                "Ma jiraan deyn kale oo maanta soo xarootay "
+                "ama deyn cusub oo baxday?",
+                "Haddii ay jirto, fadlan ii soo dir magaca iyo lacagta."
+            ])
+
+        send_whatsapp(shopkeeper_phone, "\n".join(lines))
+
+    return {"status": "evening_checkin_sent"}
 
 if __name__ == "__main__":
     import uvicorn
