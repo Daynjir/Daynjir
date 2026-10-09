@@ -1,8 +1,9 @@
 fastapi
-uvicorn
+uvicorn[standard]
 supabase
 groq
 requests
 python-dotenv
 pandas
 openpyxl
+reportlab
