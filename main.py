@@ -540,91 +540,139 @@ async def whatsapp_webhook(request: Request):
         
         elif action == "LIST":
             try:
-                # Build query
-                query = supabase.table("debtors").select("*").eq("shopkeeper_id", shopkeeper_id).eq("is_paid", False)
-                
-                # Apply date filter if exists
+                # Detect whether the user asked for due dates
+                text_lower = message_text.lower()
+
+                wants_due_dates = any(keyword in text_lower for keyword in [
+                    "balanta",
+                    "balamaha",
+                    "ballanta",
+                    "ballamaha",
+                    "balan",
+                    "due",
+                    "date"
+                ])
+
+                # Start with unpaid debts only
+                query = (
+                    supabase.table("debtors")
+                    .select("*")
+                    .eq("shopkeeper_id", shopkeeper_id)
+                    .eq("is_paid", False)
+                )
+
+                # If a specific date was requested, filter by that date
                 if filter_date:
                     query = query.eq("promised_date", filter_date)
+
                     if filter_type == "today":
                         message_title = "📋 *Balamaha Maanta*"
                     elif filter_type == "tomorrow":
                         message_title = "📋 *Balamaha Berri*"
                     else:
                         message_title = f"📋 *Balamaha {filter_date}*"
+
+                    wants_due_dates = True
                 else:
                     query = query.order("promised_date", desc=False)
-                    # Check if user asked for due dates
-                    show_due_dates = any(keyword in message_text.lower() for keyword in ['balamaha', 'balamaha', 'balanta', 'ballanta', 'due'])
-                    if show_due_dates:
+
+                    if wants_due_dates:
                         message_title = "📋 *Liiska Deynta iyo Balamaha*"
                     else:
                         message_title = "📋 *Liiska Deynta*"
-                
+
                 debts_query = query.execute()
-                
+
                 if not debts_query.data:
                     if filter_date:
-                        send_whatsapp(sender_phone, f"✅ Ma jiraan deymo balanteedu tahay {filter_date}.")
+                        send_whatsapp(
+                            sender_phone,
+                            f"✅ Ma jiraan deymo balanteedu tahay {filter_date}."
+                        )
                     else:
-                        send_whatsapp(sender_phone, "✅ Ma hayo Deyn aan la bixin. All debts are paid!")
-                else:
-                    # Check if user asked for due dates
-                    show_due_dates = filter_date or any(keyword in message_text.lower() for keyword in ['balamaha', 'balamaha', 'balanta', 'ballanta', 'due'])
-                    
-                    debt_list = []
-                    total = 0
-                    overdue_count = 0
-                    today = datetime.utcnow().date()
-                    
-                    for i, debt in enumerate(debts_query.data, 1):
-                        name = debt['name']
-                        amount = debt['amount']
-                        due_date = debt.get('promised_date')
-                        
-                        # Check if overdue
+                        send_whatsapp(
+                            sender_phone,
+                            "✅ Ma jiraan deyn aan la bixin."
+                        )
+                    continue
+
+                debt_list = []
+                total = 0
+                overdue_count = 0
+                today = datetime.utcnow().date()
+
+                for index, debt in enumerate(debts_query.data, start=1):
+                    debtor_name = debt["name"]
+                    debtor_amount = float(debt["amount"])
+                    due_date = debt.get("promised_date")
+
+                    total += debtor_amount
+
+                    if wants_due_dates:
                         status = ""
+
                         if due_date:
                             try:
-                                due = datetime.strptime(due_date, '%Y-%m-%d').date()
-                                days_diff = (due - today).days
-                                
-                                if days_diff < 0:
-                                    # Overdue
-                                    status = f" ⚠️ Balan dhaaf ({abs(days_diff)} days)"
+                                due = datetime.strptime(
+                                    due_date,
+                                    "%Y-%m-%d"
+                                ).date()
+
+                                days_left = (due - today).days
+
+                                if days_left < 0:
+                                    status = (
+                                        f" ⚠️ Balan dhaaf "
+                                        f"({abs(days_left)} maalin)"
+                                    )
                                     overdue_count += 1
-                                elif days_diff == 0:
-                                    status = " 🔴 Balanta Maanta"
-                                elif days_diff <= 3:
-                                    # Show both days left AND the date
-                                    due_formatted = datetime.strptime(due_date, '%Y-%m-%d').strftime('%b %d')
-                                    status = f" ⏰ {days_diff} maalin kadib ({due_formatted})"
+                                elif days_left == 0:
+                                    status = " 🔴 Balanta maanta"
                                 else:
-                                    # More than 3 days - just show the date
-                                    due_formatted = datetime.strptime(due_date, '%Y-%m-%d').strftime('%b %d')
-                                    status = f" 📅 {due_formatted}"
-                            except:
-                                pass
-                        
-                        if show_due_dates:
-                            debt_list.append(f"{i}. {name}: ${amount}{status} - {due_date}")
-                        else:
-                            debt_list.append(f"{i}. {name}: ${amount}{status}")
-                        
-                        total += amount
-                    
-                    message = f"{message_title} ({len(debts_query.data)} debtor(s)):\n\n" + "\n".join(debt_list)
-                    
-                    if overdue_count > 0:
-                        message = f"⚠️ *{overdue_count} overdue debt(s)*:\n\n" + message
-                    
-                    message += f"\n\n💰 **Total: ${total:.2f}**"
-                    
-                    send_whatsapp(sender_phone, message)
-                
+                                    status = f" 📅 {due_date}"
+                            except Exception:
+                                status = f" 📅 {due_date}"
+
+                        debt_list.append(
+                            f"{index}. {debtor_name}: "
+                            f"${debtor_amount:.2f}{status} "
+                            f"— Ballan: {due_date or 'lama gelin'}"
+                        )
+                    else:
+                        debt_list.append(
+                            f"{index}. {debtor_name}: "
+                            f"${debtor_amount:.2f}"
+                        )
+
+                message = (
+                    f"{message_title} "
+                    f"({len(debts_query.data)} macmiil):\n\n"
+                    + "\n".join(debt_list)
+                )
+
+                if wants_due_dates and overdue_count > 0:
+                    message = (
+                        f"⚠️ {overdue_count} deyn balan dhaafay:\n\n"
+                        + message
+                    )
+
+                message += (
+                    f"\n\n💰 Lacagta guud: "
+                    f"${total:.2f}"
+                )
+
+                send_whatsapp(sender_phone, message)
+
             except Exception as e:
-                send_whatsapp(sender_phone, f"❌ Khalad: {str(e)}")
-                failed_inserts.append({"name": "LIST", "reason": f"List error: {str(e)}"})
+                print(f"❌ List error: {e}")
+                send_whatsapp(
+                    sender_phone,
+                    "❌ Khalad ayaa dhacay marka liiska la soo saarayay."
+                )
+                failed_inserts.append({
+                    "name": "LIST",
+                    "reason": f"List error: {str(e)}"
+                })
 
         elif action == "EDIT":
             try:
