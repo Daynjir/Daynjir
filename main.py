@@ -485,10 +485,19 @@ def ask_for_full_name(sender_phone, matches, action):
 
     send_whatsapp(sender_phone, message)
   
+from collections import defaultdict
+
+due_list_followup_counts = defaultdict(int)
+
 def send_due_list_followup(phone):
+    due_list_followup_counts[phone] += 1
+
+    if due_list_followup_counts[phone] % 5 != 0:
+        return
+
     send_whatsapp(
         phone,
-        "Si aad u eegto liiska deynta oo dhan soo qor:\n"
+        "haddii aad u baahan tahay liiska deynta oo dhan soo qor:\n"
         "Liiska daynta\n"
         "ama\n"
         "Liiska daynta iyo balamaha"
