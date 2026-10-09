@@ -955,9 +955,9 @@ async def whatsapp_webhook(request: Request):
         if not entries:
             if is_rate_limited:
                 reply = (
-                    "⏳ AI-gu wuxuu gaaray xadka isticmaalka, fariintana si ammaan ah looma fahmin.\n\n"
-                    "Fadlan isticmaal qaab cad sida: MAGACA $10, edit MAGACA $10, "
-                    "delete MAGACA, ama search MAGACA. Fariinta lama diiwaangelin."
+                    "⏳ AI-gu wuxuu gaaray xadka isticmaalka, fariintana muu fahmin.\n\n"
+                    "Fadlan isticmaal qaabkan sida: si aad qof cusub ugu darto MAGACA $lacagta, edit MAGACA $lacagta, "
+                    "delete MAGACA, ama search MAGACA."
                 )
                 send_whatsapp(sender_phone, reply)
                 return {"status": "groq_rate_limited_unparsed"}
