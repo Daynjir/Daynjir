@@ -20,9 +20,9 @@ app = FastAPI()
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-INSTANCE_ID = "710722758620"
-GREEN_API_TOKEN = "feb8f9b99fa047a3b8b3442b303b6cbb8564a60129604f149c"
-GREEN_API_BASE = "https://7107.api.greenapi.com"
+INSTANCE_ID = os.getenv("GREEN_API_INSTANCE_ID", "710722758620")
+GREEN_API_TOKEN = os.getenv("GREEN_API_TOKEN", "")
+GREEN_API_BASE = os.getenv("GREEN_API_BASE", "https://7107.api.greenapi.com")
 
 SYSTEM_PROMPT = """You are Daynjir, a Somali debt management assistant for small shopkeepers. 
 Extract transaction intent from chaotic, unstructured Somali text into raw JSON. 
@@ -35,7 +35,7 @@ ALWAYS return a JSON array, even for single entries.
 
 Response format (JSON array):
 [
-  {"action": "ADD" or "PAY" or "LIST" or "SEARCH" or "EDIT" or "DELETE" or "HISTORY" or "REPORT" or "EXPORT", "customer_name": "string or null", "amount": number or null, "days_until_due": number or null, "customer_phone": "string or null", "promised_date": "YYYY-MM-DD or null", "filter_date": "YYYY-MM-DD or null", "filter_type": "today" or "tomorrow" or "date" or "week" or "month" or null, "new_amount": number or null, "new_date": "YYYY-MM-DD or null", "new_phone": "string or null"}
+  {"action": "ADD" or "PAY" or "LIST" or "SEARCH" or "EDIT" or "DELETE" or "HISTORY" or "REPORT" or "EXPORT", "customer_name": "string or null", "amount": number or null, "days_until_due": number or null, "customer_phone": "string or null", "promised_date": "YYYY-MM-DD or null", "filter_date": "YYYY-MM-DD or null", "filter_type": "today" or "tomorrow" or "date" or "week" or "month" or null, "new_amount": number or null, "new_date": "YYYY-MM-DD or null", "new_phone": "string or null", "payment_type": "FULL" or "PARTIAL" or "UNKNOWN" or null}
 ]
 
 Examples - ADD:
@@ -43,8 +43,8 @@ Examples - ADD:
 'Cali $34 oct 8, Axmed $50 oct 9' -> [{"action": "ADD", "customer_name": "Cali", "amount": 34, "days_until_due": 1, "customer_phone": null, "promised_date": "YYYY-MM-DD", "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}, {"action": "ADD", "customer_name": "Axmed", "amount": 50, "days_until_due": 2, "customer_phone": null, "promised_date": "YYYY-MM-DD", "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
 
 Examples - PAY:
-'Cali wuu bixiyay' -> [{"action": "PAY", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
-'Gaawe wuxuu bixiyay $5' -> [{"action": "PAY", "customer_name": "Gaawe", "amount": 5, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
+'Cali wuu bixiyay' -> [{"action": "PAY", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null, "payment_type": "FULL"}]
+'Gaawe wuxuu bixiyay $5' -> [{"action": "PAY", "customer_name": "Gaawe", "amount": 5, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null, "payment_type": "PARTIAL"}]
 'Cali wuu bixiyay, Axmed wuu bixiyay' -> [{"action": "PAY", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}, {"action": "PAY", "customer_name": "Axmed", "amount": null, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
 'Cali wuxuu bixiyay $10, Axmed wuxuu bixiyay $20' -> [{"action": "PAY", "customer_name": "Cali", "amount": 10, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}, {"action": "PAY", "customer_name": "Axmed", "amount": 20, "days_until_due": null, "customer_phone": null, "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": null}]
 
@@ -85,6 +85,28 @@ Examples - PHONE:
 'Cali 615123456' -> [{"action": "ADD", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": "615123456", "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": "615123456"}]
 'Save Cali phone 615123456' -> [{"action": "ADD", "customer_name": "Cali", "amount": null, "days_until_due": null, "customer_phone": "615123456", "promised_date": null, "filter_date": null, "filter_type": null, "new_amount": null, "new_date": null, "new_phone": "615123456"}]
 
+Somali casual-language rules (understand spelling mistakes and informal phrasing):
+- "Yuusuf $30 amaah ah ayuu qaatay" -> ADD, customer_name="Yuusuf", amount=30.
+- "Jaamac 60 ayuu iga qaatay" -> ADD, customer_name="Jaamac", amount=60.
+- "Axmed $10 deyn ah" -> ADD, customer_name="Axmed", amount=10.
+- "Cali ka jar $10" -> PAY, customer_name="Cali", amount=10, payment_type="PARTIAL".
+- "Cali waan ka helay $10" -> PAY, customer_name="Cali", amount=10, payment_type="PARTIAL".
+- "Cali wuxuu bixiyay $10" -> PAY, customer_name="Cali", amount=10, payment_type="PARTIAL".
+- "Cali wuu bixiyay" or "Cali deyntii oo dhan wuu bixiyay" -> PAY, customer_name="Cali", amount=null, payment_type="FULL".
+- "Cali waan ka helay" without an amount -> PAY, customer_name="Cali", amount=null, payment_type="UNKNOWN". Do not assume full payment; ask how much was received.
+- "Cali deyntiisa ka dhig $50" -> EDIT, customer_name="Cali", new_amount=50.
+- "Cali balantiisa ka dhig 2026-10-20" -> EDIT, customer_name="Cali", new_date="2026-10-20".
+- "Cali deynta $50 ka dhig, balantana 2026-10-20" -> EDIT with new_amount=50 and new_date="2026-10-20".
+
+PAYMENT SAFETY:
+- Return the field payment_type for every entry: "FULL", "PARTIAL", "UNKNOWN", or null.
+- Use FULL only when the message clearly means the entire debt was paid.
+- If a payment amount is stated, use PARTIAL; the code will cap it at the outstanding balance.
+- If the message suggests money was received but gives no amount and does not clearly say the entire debt was paid, use UNKNOWN.
+- Do not confuse taking/borrowing money (ADD) with paying money back (PAY).
+- For EDIT, use new_amount and new_date. For ADD/PAY, use amount.
+- If intent is unclear, choose SEARCH only when the user is asking about a debt; otherwise ask for clarification rather than changing data.
+
 Also support English:
 'Add debt' = ADD action
 'List debts' = LIST action
@@ -99,7 +121,10 @@ Also support English:
 
 def send_whatsapp(to_phone: str, message: str):
     clean_phone = str(to_phone).lstrip("+").split("@")[0].strip()
-    url = "https://7107.api.greenapi.com/waInstance710722758620/sendMessage/feb8f9b99fa047a3b8b3442b303b6cbb8564a60129604f149c"
+    if not GREEN_API_TOKEN:
+        print("❌ GREEN_API_TOKEN is not configured in environment variables")
+        return
+    url = f"{GREEN_API_BASE}/waInstance{INSTANCE_ID}/sendMessage/{GREEN_API_TOKEN}"
     chat_id = f"{clean_phone}@c.us"
     payload = {"chatId": chat_id, "message": message}
     print(f"🔍 send_whatsapp called:")
@@ -122,7 +147,6 @@ def find_debtor_matches(shopkeeper_id, name):
         supabase.table("debtors")
         .select("*")
         .eq("shopkeeper_id", shopkeeper_id)
-        .eq("is_paid", False)
         .ilike("name", f"%{name.strip()}%")
         .order("name")
         .execute()
@@ -493,6 +517,7 @@ async def whatsapp_webhook(request: Request):
         new_amount = entry.get("new_amount")
         new_date = entry.get("new_date")
         new_phone = entry.get("new_phone")
+        payment_type = str(entry.get("payment_type") or "UNKNOWN").upper()
         filter_date = entry.get("filter_date")
         filter_type = entry.get("filter_type")
         
@@ -536,14 +561,12 @@ async def whatsapp_webhook(request: Request):
         elif action == "PAY":
             try:
                 payment_amount = entry.get("amount")
+                payment_type = str(entry.get("payment_type") or "UNKNOWN").upper()
                 matches = find_debtor_matches(shopkeeper_id, name)
 
                 if len(matches) == 0:
-                    send_whatsapp(sender_phone, f"❌ Lama helin deynta {name}.")
-                    failed_inserts.append({
-                        "name": name,
-                        "reason": "Debtor not found"
-                    })
+                    send_whatsapp(sender_phone, f"❌ Lama helin deynta aan weli la bixin ee {name}.")
+                    failed_inserts.append({"name": name, "reason": "Unpaid debtor not found"})
                     continue
 
                 if len(matches) > 1:
@@ -551,105 +574,82 @@ async def whatsapp_webhook(request: Request):
                     continue
 
                 debtor = matches[0]
-                current_balance = float(debtor["amount"])
+                current_balance = float(debtor.get("amount") or 0)
 
-                # No amount specified: treat this as full payment.
-                if payment_amount is None:
-                    if current_balance <= 0:
-                        send_whatsapp(
-                            sender_phone,
-                            f"✅ {debtor['name']} hore ayuu u bixiyay deyntiisa."
-                        )
-                        continue
+                if current_balance <= 0 or debtor.get("is_paid") is True:
+                    send_whatsapp(sender_phone, f"✅ {debtor['name']} hore ayuu u bixiyay deyntiisa.")
+                    continue
 
-                    # Save the payment transaction before updating the balance.
-                    supabase.table("payments").insert({
-                        "debtor_id": debtor["id"],
-                        "shopkeeper_id": shopkeeper_id,
-                        "amount": current_balance
-                    }).execute()
-
-                    (
-                        supabase.table("debtors")
-                        .update({"amount": 0, "is_paid": True})
-                        .eq("id", debtor["id"])
-                        .eq("shopkeeper_id", shopkeeper_id)
-                        .execute()
-                    )
-
+                # A missing amount is a full payment ONLY when the AI explicitly says FULL.
+                if payment_amount is None and payment_type != "FULL":
                     send_whatsapp(
                         sender_phone,
-                        f"✅ {debtor['name']} wuu bixiyay deyntii oo dhan "
-                        f"(${current_balance:.2f})."
+                        f"💵 {debtor['name']} lacag intee le'eg ayaad ka heshay?\n"
+                        f"Tusaale: {debtor['name']} ka jar $10.\n"
+                        "Haddii uu deynta oo dhan bixiyay, qor: "
+                        f"{debtor['name']} wuu bixiyay deyntii oo dhan."
+                    )
+                    continue
+
+                if payment_amount is None:
+                    payment_amount = current_balance
+                else:
+                    try:
+                        payment_amount = float(payment_amount)
+                    except (TypeError, ValueError):
+                        send_whatsapp(sender_phone, "❌ Lacagta ma fahmin. Tusaale: Cali ka jar $10.")
+                        continue
+
+                if payment_amount <= 0:
+                    send_whatsapp(sender_phone, "❌ Lacagta la bixiyay waa inay ka badan tahay $0.")
+                    continue
+
+                actual_payment = min(payment_amount, current_balance)
+                new_balance = round(max(0.0, current_balance - actual_payment), 2)
+                is_now_paid = new_balance <= 0
+
+                # Record the payment first. If this fails, the debt balance is not changed.
+                payment_result = supabase.table("payments").insert({
+                    "debtor_id": debtor["id"],
+                    "shopkeeper_id": shopkeeper_id,
+                    "amount": actual_payment
+                }).execute()
+                if not payment_result.data:
+                    raise RuntimeError("Payment insert returned no row; check payments table schema and RLS policies")
+
+                # Verify that Supabase actually updated the debtor row.
+                update_result = (
+                    supabase.table("debtors")
+                    .update({"amount": new_balance, "is_paid": is_now_paid})
+                    .eq("id", debtor["id"])
+                    .eq("shopkeeper_id", shopkeeper_id)
+                    .select("id, name, amount, is_paid")
+                    .execute()
+                )
+                if not update_result.data:
+                    raise RuntimeError("Payment was recorded but debtor balance update returned no row; check permissions/RLS")
+
+                updated_debtor = update_result.data[0]
+                if is_now_paid:
+                    send_whatsapp(
+                        sender_phone,
+                        f"✅ {updated_debtor['name']} deyntii oo dhan waa la bixiyay. "
+                        f"Lacagta la diiwaangeliyay: ${actual_payment:.2f}."
+                    )
+                else:
+                    send_whatsapp(
+                        sender_phone,
+                        f"✅ {updated_debtor['name']} wuxuu bixiyay ${actual_payment:.2f}. "
+                        f"Haray: ${float(updated_debtor['amount']):.2f}."
                     )
 
-                else:
-                    payment_amount = float(payment_amount)
-
-                    if payment_amount <= 0:
-                        send_whatsapp(
-                            sender_phone,
-                            "❌ Lacagta la bixiyay waa inay ka badan tahay $0."
-                        )
-                        continue
-
-                    if current_balance <= 0:
-                        send_whatsapp(
-                            sender_phone,
-                            f"✅ {debtor['name']} hore ayuu u bixiyay deyntiisa."
-                        )
-                        continue
-
-                    actual_payment = min(payment_amount, current_balance)
-                    new_balance = current_balance - actual_payment
-
-                    # Save the transaction.
-                    supabase.table("payments").insert({
-                        "debtor_id": debtor["id"],
-                        "shopkeeper_id": shopkeeper_id,
-                        "amount": actual_payment
-                    }).execute()
-
-                    if new_balance <= 0:
-                        (
-                            supabase.table("debtors")
-                            .update({"amount": 0, "is_paid": True})
-                            .eq("id", debtor["id"])
-                            .eq("shopkeeper_id", shopkeeper_id)
-                            .execute()
-                        )
-
-                        send_whatsapp(
-                            sender_phone,
-                            f"✅ {debtor['name']} wuu bixiyay deyntii oo dhan. "
-                            f"Lacagta la diiwaangeliyay: ${actual_payment:.2f}."
-                        )
-                    else:
-                        (
-                            supabase.table("debtors")
-                            .update({"amount": new_balance, "is_paid": False})
-                            .eq("id", debtor["id"])
-                            .eq("shopkeeper_id", shopkeeper_id)
-                            .execute()
-                        )
-
-                        send_whatsapp(
-                            sender_phone,
-                            f"✅ {debtor['name']} wuxuu bixiyay "
-                            f"${actual_payment:.2f}. "
-                            f"Haray: ${new_balance:.2f}"
-                        )
-
             except Exception as e:
-                print(f"❌ Payment error: {e}")
+                print(f"❌ Payment error: {type(e).__name__}: {e}")
                 send_whatsapp(
                     sender_phone,
-                    "❌ Khalad ayaa dhacay marka lacagta la bixinayay."
+                    f"❌ Lacag-bixintu way fashilantay ({type(e).__name__}). Hubi server logs-ka."
                 )
-                failed_inserts.append({
-                    "name": name,
-                    "reason": f"Payment error: {str(e)}"
-                })
+                failed_inserts.append({"name": name, "reason": f"Payment error: {type(e).__name__}: {e}"})
         
         elif action == "LIST":
             try:
@@ -797,11 +797,8 @@ async def whatsapp_webhook(request: Request):
                 matches = find_debtor_matches(shopkeeper_id, name)
 
                 if len(matches) == 0:
-                    send_whatsapp(sender_phone, f"❌ Lama helin {name}.")
-                    failed_inserts.append({
-                        "name": name,
-                        "reason": "Debtor not found"
-                    })
+                    send_whatsapp(sender_phone, f"❌ Lama helin deynta aan weli la bixin ee {name}.")
+                    failed_inserts.append({"name": name, "reason": "Debtor not found"})
                     continue
 
                 if len(matches) > 1:
@@ -809,66 +806,70 @@ async def whatsapp_webhook(request: Request):
                     continue
 
                 debtor = matches[0]
-
                 update_data = {}
 
-                if new_amount is not None:
-                    update_data["amount"] = float(new_amount)
+                # Fallbacks support inconsistent model output, e.g. amount instead of new_amount.
+                amount_to_set = new_amount if new_amount is not None else amount
+                date_to_set = new_date if new_date is not None else promised_date
 
-                if new_date is not None:
-                    update_data["promised_date"] = new_date
+                if amount_to_set is not None:
+                    try:
+                        amount_to_set = float(amount_to_set)
+                    except (TypeError, ValueError):
+                        send_whatsapp(sender_phone, "❌ Lacagta cusub ma saxna.")
+                        continue
+                    if amount_to_set < 0:
+                        send_whatsapp(sender_phone, "❌ Lacagtu ma noqon karto tiro taban.")
+                        continue
+                    update_data["amount"] = amount_to_set
+                    update_data["is_paid"] = amount_to_set <= 0
+
+                if date_to_set is not None:
+                    try:
+                        parsed_date = datetime.strptime(str(date_to_set), "%Y-%m-%d").date()
+                        update_data["promised_date"] = parsed_date.isoformat()
+                    except (TypeError, ValueError):
+                        send_whatsapp(sender_phone, "❌ Taariikh khaldan. Isticmaal YYYY-MM-DD, tusaale 2026-10-20.")
+                        continue
 
                 if not update_data:
                     send_whatsapp(
                         sender_phone,
-                        "❌ Wax isbeddel ah lama helin.\n"
-                        "Tusaale: edit Ali Hassan $50"
+                        "❌ Ma helin lacag ama taariikh cusub.\n"
+                        "Tusaale: Cali deyntiisa ka dhig $50\n"
+                        "Ama: Cali balantiisa ka dhig 2026-10-20"
                     )
-                    failed_inserts.append({
-                        "name": name,
-                        "reason": "No changes supplied"
-                    })
+                    failed_inserts.append({"name": name, "reason": "No changes supplied"})
                     continue
 
-                (
+                result = (
                     supabase.table("debtors")
                     .update(update_data)
                     .eq("id", debtor["id"])
                     .eq("shopkeeper_id", shopkeeper_id)
+                    .select("id, name, amount, promised_date, is_paid")
                     .execute()
                 )
+                if not result.data:
+                    send_whatsapp(sender_phone, "❌ Waxba lama beddelin. Hubi rukhsadaha database-ka (RLS).")
+                    failed_inserts.append({"name": name, "reason": "Update returned no rows"})
+                    continue
 
+                updated = result.data[0]
                 changes = []
-
                 if "amount" in update_data:
-                    changes.append(
-                        f"💵 Lacag: ${debtor['amount']} → ${update_data['amount']}"
-                    )
-
+                    changes.append(f"💵 Lacag: ${float(debtor['amount']):.2f} → ${float(updated['amount']):.2f}")
                 if "promised_date" in update_data:
-                    changes.append(
-                        f"📅 Ballan: {debtor['promised_date']} → "
-                        f"{update_data['promised_date']}"
-                    )
+                    changes.append(f"📅 Ballan: {debtor.get('promised_date') or 'lama gelin'} → {updated['promised_date']}")
 
-                send_whatsapp(
-                    sender_phone,
-                    f"✅ {debtor['name']} waa la cusboonaysiiyay:\n"
-                    + "\n".join(changes)
-                )
+                send_whatsapp(sender_phone, f"✅ {updated['name']} waa la cusboonaysiiyay:\n" + "\n".join(changes))
                 successful_inserts.append(entry)
 
             except Exception as e:
-                print(f"❌ Edit error: {e}")
-                send_whatsapp(
-                    sender_phone,
-                    "❌ Khalad ayaa dhacay marka deynta la beddelayay."
-                )
-                failed_inserts.append({
-                    "name": name,
-                    "reason": f"Edit error: {str(e)}"
-                })
-
+                print(f"❌ Edit error: {type(e).__name__}: {e}")
+                send_whatsapp(sender_phone, f"❌ Wax ka beddelku wuu fashilmay ({type(e).__name__}). Hubi server logs-ka.")
+                failed_inserts.append({"name": name, "reason": f"Edit error: {type(e).__name__}: {e}"})
+        
         elif action == "DELETE":
             try:
                 matches = find_debtor_matches(shopkeeper_id, name)
