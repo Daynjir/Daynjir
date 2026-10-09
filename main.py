@@ -152,7 +152,15 @@ def ask_for_full_name(sender_phone, matches, action):
     )
 
     send_whatsapp(sender_phone, message)
-
+  
+def send_due_list_followup(phone):
+    send_whatsapp(
+        phone,
+        "Si aad u eegto liiska deynta oo dhan soo qor:\n"
+        "Liiska daynta\n"
+        "ama\n"
+        "Liiska daynta iyo balamaha"
+    )
 @app.post("/webhook")
 async def whatsapp_webhook(request: Request):
     data = await request.json()
@@ -721,6 +729,8 @@ async def whatsapp_webhook(request: Request):
                 )
 
                 send_whatsapp(sender_phone, message)
+            if filter_date:
+    send_due_list_followup(sender_phone)
 
             except Exception as e:
                 print(f"❌ List error: {e}")
