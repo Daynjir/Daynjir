@@ -565,7 +565,7 @@ async def whatsapp_webhook(request: Request):
                 matches = find_debtor_matches(shopkeeper_id, name)
 
                 if len(matches) == 0:
-                    send_whatsapp(sender_phone, f"❌ Lama helin deynta aan weli la bixin ee {name}.")
+                    send_whatsapp(sender_phone, f"❌ Ma helin deynta aan weli la bixin ee {name}.")
                     failed_inserts.append({"name": name, "reason": "Unpaid debtor not found"})
                     continue
 
@@ -601,7 +601,7 @@ async def whatsapp_webhook(request: Request):
                         continue
 
                 if payment_amount <= 0:
-                    send_whatsapp(sender_phone, "❌ Lacagta la bixiyay waa inay ka badan tahay $0.")
+                    send_whatsapp(sender_phone, "❌ Lacag bixintu waa inay ka badan tahay $0.")
                     continue
 
                 actual_payment = min(payment_amount, current_balance)
@@ -700,13 +700,13 @@ async def whatsapp_webhook(request: Request):
                     if filter_date:
                         send_whatsapp(
                             sender_phone,
-                            f"✅ Ma jiraan deymo balanteedu tahay {filter_date}."
+                            f"✅ Ma jiraan deymo balantoodu tahay {filter_date}."
                         )
                         send_due_list_followup(sender_phone)
                     else:
                         send_whatsapp(
                             sender_phone,
-                            "✅ Ma jiraan deyn aan la bixin."
+                            "✅ Ma jirto deyn aan la bixin."
                         )
                     continue
 
