@@ -1071,8 +1071,7 @@ async def evening_checkin():
         if not new_debts and not payments:
             lines.extend([
                 "",
-                "Maanta maxaa Deyn soo xarooday, maxaase kaa baxay?",
-                """
+                "Maanta maxaa deyn soo xarooday, maxaase kaa baxay?",
             ])
         else:
             lines.append("")
