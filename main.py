@@ -268,16 +268,22 @@ async def whatsapp_webhook(request: Request):
                                             continue
                                 except:
                                     due_date = (datetime.utcnow() + timedelta(hours=3)).date().isoformat()
-                        else:
-                            due_date = (datetime.utcnow() + timedelta(hours=3)).date().isoformat()
-                        
+                           else:
+                            due_date = (
+                                datetime.utcnow() + timedelta(hours=3)
+                            ).date().isoformat()
+
+                        starting_amount = float(amount)
+
                         debtor_data = {
-                            'shopkeeper_id': shopkeeper_id,
-                            'name': name,
-                            'amount': amount,
-                            'promised_date': due_date,
-                            'is_paid': False
+                            "shopkeeper_id": shopkeeper_id,
+                            "name": name,
+                            "amount": starting_amount,
+                            "original_amount": starting_amount,
+                            "promised_date": due_date,
+                            "is_paid": False
                         }
+
                         supabase.table("debtors").insert(debtor_data).execute()
                         added_count += 1
                         print(f"  ✅ Added: {name} - ${amount}")
@@ -486,44 +492,90 @@ async def whatsapp_webhook(request: Request):
                 debtor = matches[0]
                 current_balance = float(debtor["amount"])
 
+                # No amount specified: treat this as full payment.
                 if payment_amount is None:
+                    if current_balance <= 0:
+                        send_whatsapp(
+                            sender_phone,
+                            f"✅ {debtor['name']} hore ayuu u bixiyay deyntiisa."
+                        )
+                        continue
+
+                    # Save the payment transaction before updating the balance.
+                    supabase.table("payments").insert({
+                        "debtor_id": debtor["id"],
+                        "shopkeeper_id": shopkeeper_id,
+                        "amount": current_balance
+                    }).execute()
+
                     (
                         supabase.table("debtors")
-                        .update({"is_paid": True})
+                        .update({"amount": 0, "is_paid": True})
                         .eq("id", debtor["id"])
                         .eq("shopkeeper_id", shopkeeper_id)
                         .execute()
                     )
+
                     send_whatsapp(
                         sender_phone,
-                        f"✅ {debtor['name']} wuu bixiyay deyntii (${current_balance})."
+                        f"✅ {debtor['name']} wuu bixiyay deyntii oo dhan "
+                        f"(${current_balance:.2f})."
                     )
+
                 else:
-                    new_balance = current_balance - float(payment_amount)
+                    payment_amount = float(payment_amount)
+
+                    if payment_amount <= 0:
+                        send_whatsapp(
+                            sender_phone,
+                            "❌ Lacagta la bixiyay waa inay ka badan tahay $0."
+                        )
+                        continue
+
+                    if current_balance <= 0:
+                        send_whatsapp(
+                            sender_phone,
+                            f"✅ {debtor['name']} hore ayuu u bixiyay deyntiisa."
+                        )
+                        continue
+
+                    actual_payment = min(payment_amount, current_balance)
+                    new_balance = current_balance - actual_payment
+
+                    # Save the transaction.
+                    supabase.table("payments").insert({
+                        "debtor_id": debtor["id"],
+                        "shopkeeper_id": shopkeeper_id,
+                        "amount": actual_payment
+                    }).execute()
 
                     if new_balance <= 0:
                         (
                             supabase.table("debtors")
-                            .update({"is_paid": True, "amount": 0})
+                            .update({"amount": 0, "is_paid": True})
                             .eq("id", debtor["id"])
                             .eq("shopkeeper_id", shopkeeper_id)
                             .execute()
                         )
+
                         send_whatsapp(
                             sender_phone,
-                            f"✅ {debtor['name']} wuu bixiyay deyntii oo dhan."
+                            f"✅ {debtor['name']} wuu bixiyay deyntii oo dhan. "
+                            f"Lacagta la diiwaangeliyay: ${actual_payment:.2f}."
                         )
                     else:
                         (
                             supabase.table("debtors")
-                            .update({"amount": new_balance})
+                            .update({"amount": new_balance, "is_paid": False})
                             .eq("id", debtor["id"])
                             .eq("shopkeeper_id", shopkeeper_id)
                             .execute()
                         )
+
                         send_whatsapp(
                             sender_phone,
-                            f"✅ {debtor['name']} wuxuu bixiyay ${payment_amount}. "
+                            f"✅ {debtor['name']} wuxuu bixiyay "
+                            f"${actual_payment:.2f}. "
                             f"Haray: ${new_balance:.2f}"
                         )
 
