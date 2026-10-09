@@ -338,37 +338,48 @@ def resolve_name_from_original_message(shopkeeper_id, message_text, ai_name):
         if normalized:
             stored_names.setdefault(normalized, display)
 
-    # Only accept a name that appears as whole words in the user's original text.
+    # First accept an exact full-name phrase. If the customer typed a small
+    # spelling variation (e.g. MAT AAN vs MATAN), compare same-length word
+    # windows from the original message against stored names.
+    message_parts = normalize_customer_name(message_text).split()
     requested_parts = normalize_customer_name(ai_name).split()
-
     candidates = []
+
     for normalized, display in stored_names.items():
-        # The stored name must appear in the message AND resemble the name
-        # extracted by the AI; this prevents another person's name in a
-        # multi-customer message from being assigned to every action.
-        if f" {normalized} " not in normalized_message:
-            continue
         stored_parts = normalized.split()
+        if not stored_parts:
+            continue
+        if f" {normalized} " in normalized_message:
+            score = 1.0
+        else:
+            # Compare contiguous phrase windows of the same word count. This
+            # avoids treating a shared token like CALI as a full-name match.
+            windows = [
+                " ".join(message_parts[i:i + len(stored_parts)])
+                for i in range(max(0, len(message_parts) - len(stored_parts) + 1))
+            ]
+            score = max((_name_similarity(window, normalized) for window in windows), default=0.0)
+
         has_related_token = any(
             _token_match_score(req, stored) >= 0.78
             for req in requested_parts
             for stored in stored_parts
         )
-        if has_related_token:
-            candidates.append((len(stored_parts), len(normalized), display, normalized))
+        if score >= 0.78 and has_related_token:
+            candidates.append((score, len(stored_parts), len(normalized), display, normalized))
+
     if not candidates:
         return None
 
-    # A full name in the text is stronger evidence than the AI's shortened name.
-    # Prefer the longest matching stored name, but don't guess between different
-    # equally-long names that both appear in the message.
-    candidates.sort(reverse=True)
-    best_size = candidates[0][:2]
-    best = [c for c in candidates if c[:2] == best_size]
-    unique_names = {c[2] for c in best}
+    candidates.sort(key=lambda c: (c[0], c[1], c[2]), reverse=True)
+    best_score = candidates[0][0]
+    # Only auto-resolve when one stored name clearly wins. If two names are
+    # similarly close, leave the AI's name unchanged so normal disambiguation runs.
+    best = [c for c in candidates if best_score - c[0] <= 0.04]
+    unique_names = {c[3] for c in best}
     if len(unique_names) == 1:
         resolved = next(iter(unique_names))
-        print(f"🔎 Recovered full debtor name from original message: {ai_name!r} -> {resolved!r}")
+        print(f"🔎 Recovered full debtor name from original message: {ai_name!r} -> {resolved!r} (score={best_score:.3f})")
         return resolved
     return None
 
