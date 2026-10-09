@@ -732,7 +732,7 @@ async def whatsapp_webhook(request: Request):
         if not sk_query.data:
             send_whatsapp(
                 sender_phone,
-                "⏳ You are not registered. Send JOIN to request access."
+                "⏳ Weli isma aadan diwaan gelinin. soo qor JOIN si laguu aqbalo."
             )
             return {"status": "not_registered"}
 
@@ -740,7 +740,7 @@ async def whatsapp_webhook(request: Request):
         if shopkeeper.get("approval_status") != "approved":
             send_whatsapp(
                 sender_phone,
-                "⏳ Your request is pending approval. Please wait for the owner."
+                "⏳ codsigaaga waa la diray. fadlan sug jawaabta."
             )
             return {"status": "not_approved"}
 
@@ -819,7 +819,7 @@ async def whatsapp_webhook(request: Request):
    Tusaale: Axmed $100 balanta=beri
 
 ✅ **Raadi macmiil:**
-   Search XIIS CALI MATAN
+   Search kadib magaca macmiilka
    Ama qor magaca macmiilka oo keliya
 
 ✅ **Liiska deynta:**
@@ -900,8 +900,8 @@ async def whatsapp_webhook(request: Request):
                     sender_phone,
                     "⚠️ Lacagta deynta lama sheegin.\n\n"
                     "Haddii aad rabto inaad beddesho ballanta deyn hore, qor magaca iyo taariikhda.\n"
-                    "Tusaale: C/SAMAD SANDHEERE oct 10\n"
-                    "Deyn cusubna ku qor: C/SAMAD SANDHEERE $4 oct 10"
+                    "Tusaale: Cali oct 10\n"
+                    "Deyn cusubna ku qor: faarax $40 oct 10"
                 )
                 failed_inserts.append({"name": name or "Unknown", "reason": "Amount missing for new debt"})
                 continue
@@ -925,7 +925,7 @@ async def whatsapp_webhook(request: Request):
         if action == "ADD":
             try:
                 if amount is None and not new_phone:
-                    send_whatsapp(sender_phone, "⚠️ Lacagta deynta lama sheegin. Tusaale: C/SAMAD SANDHEERE $4 oct 10")
+                    send_whatsapp(sender_phone, "⚠️ ma cada cadadka deyntu, fadlan xaqiiji)
                     failed_inserts.append({"name": name, "reason": "Amount missing for new debt"})
                     continue
                 if not promised_date and days_until_due is not None:
@@ -1008,7 +1008,7 @@ async def whatsapp_webhook(request: Request):
                     try:
                         payment_amount = float(payment_amount)
                     except (TypeError, ValueError):
-                        send_whatsapp(sender_phone, "❌ Lacagta ma fahmin. Tusaale: Cali ka jar $10.")
+                        send_whatsapp(sender_phone, "❌ cadadka Lacagta ma fahmin.")
                         continue
 
                 if payment_amount <= 0:
@@ -1019,7 +1019,7 @@ async def whatsapp_webhook(request: Request):
                     send_whatsapp(
                         sender_phone,
                         f"⚠️ {debtor['name']} haraaga deyntiisu waa ${current_balance:.2f}, "
-                        f"laakiin waxaad sheegtay ${payment_amount:.2f}. Lacag-bixinta lama diiwaangelin "
+                        f"laakiin waxaad sheegtay ${payment_amount:.2f}. Lacag-bixintan lama diiwaangelin "
                         "si aan haraaga uga dhigin tiro taban. Hubi lacagta oo mar kale dir."
                     )
                     continue
@@ -1112,13 +1112,13 @@ async def whatsapp_webhook(request: Request):
                     if filter_date:
                         send_whatsapp(
                             sender_phone,
-                            f"✅ Ma jiraan deymo balanteedu tahay {filter_date}."
+                            f"✅ Ma jiraan deymo balantoodu tahay {filter_date}."
                         )
                         send_due_list_followup(sender_phone)
                     else:
                         send_whatsapp(
                             sender_phone,
-                            "✅ Ma jiraan deyn aan la bixin."
+                            "✅ Ma jirto deyn aan la bixin."
                         )
                     continue
 
@@ -1179,7 +1179,7 @@ async def whatsapp_webhook(request: Request):
 
                 if wants_due_dates and overdue_count > 0:
                     message = (
-                        f"⚠️ {overdue_count} deyn balan dhaafay:\n\n"
+                        f"⚠️ {overdue_count} deymaha balandhaafka ah:\n\n"
                         + message
                     )
 
@@ -1209,7 +1209,7 @@ async def whatsapp_webhook(request: Request):
                 matches = find_debtor_matches(shopkeeper_id, name)
 
                 if len(matches) == 0:
-                    send_whatsapp(sender_phone, f"❌ Lama helin deynta aan weli la bixin ee {name}.")
+                    send_whatsapp(sender_phone, f"❌ ma helin deyn aan weli la bixin oo ku qoran {name}.")
                     failed_inserts.append({"name": name, "reason": "Debtor not found"})
                     continue
 
@@ -1282,9 +1282,7 @@ async def whatsapp_webhook(request: Request):
                 if not update_data:
                     send_whatsapp(
                         sender_phone,
-                        "❌ Ma helin lacag ama taariikh cusub.\n"
-                        "Tusaale: Cali deyntiisa ka dhig $50\n"
-                        "Ama: Cali balantiisa ka dhig 2026-10-20"
+                        "❌ Ma diwaan gelin lacag ama taariikh cusub.\n"
                     )
                     failed_inserts.append({"name": name, "reason": "No changes supplied"})
                     continue
@@ -1378,7 +1376,7 @@ async def whatsapp_webhook(request: Request):
                 paid_count = sum(1 for d in search_matches if d.get("is_paid"))
                 lines = []
                 for i, debt in enumerate(sorted(search_matches, key=lambda d: str(d.get("created_at") or ""), reverse=True), 1):
-                    status = "✅ LA BIXIYAY" if debt.get("is_paid") else "⏳ WELI LAGUMA BIXIN"
+                    status = "✅ LA BIXIYAY" if debt.get("is_paid") else "⏳ WELI LAMA BIXIN"
                     lines.append(f"{i}. ${float(debt.get('amount') or 0):.2f} — Ballan: {debt.get('promised_date') or 'lama gelin'} — {status}")
                 message = (
                     f"🔎 *Natiijada raadinta: {matched_name}*\n\n"
@@ -1389,7 +1387,7 @@ async def whatsapp_webhook(request: Request):
                 send_whatsapp(sender_phone, message)
             except Exception as e:
                 print(f"❌ Search error: {type(e).__name__}: {e}")
-                send_whatsapp(sender_phone, "❌ Khalad ayaa dhacay markii qofka la raadinayay. Fadlan mar kale isku day.")
+                send_whatsapp(sender_phone, "❌ Khalad ayaa dhacay markii aan magacan la raadinayay. Fadlan mar kale isku day.")
                 failed_inserts.append({"name": name, "reason": f"Search error: {type(e).__name__}: {e}"})
 
         elif action == "HISTORY":
@@ -1398,7 +1396,7 @@ async def whatsapp_webhook(request: Request):
                 history_matches = find_debtor_matches(shopkeeper_id, name)
 
                 if not history_matches:
-                    send_whatsapp(sender_phone, f"❌ Taariikh looma helin macmiilka {name}.")
+                    send_whatsapp(sender_phone, f"❌ macmiilkan malaha dhaqdhaqaaq {name}.")
                 elif len({normalize_customer_name(d.get("name")) for d in history_matches}) > 1:
                     ask_for_full_name(sender_phone, history_matches, "HISTORY")
                 else:
@@ -1453,7 +1451,7 @@ async def whatsapp_webhook(request: Request):
                     lines.extend([
                         "━━━━━━━━━━━━━━",
                         f"💵 *Wadarta lacagta la bixiyay ee diiwaangashan:* ${total_paid:.2f}",
-                        f"📌 *Wadarta haraaga deynta:* ${total_balance:.2f}",
+                        f"📌 *Wadarta hadhaaga deynta:* ${total_balance:.2f}",
                         "_Warbixintani waxay ku salaysan tahay diiwaannada hadda ku jira nidaamka._"
                     ])
                     message = "\n".join(lines)
@@ -1478,7 +1476,7 @@ async def whatsapp_webhook(request: Request):
 
             except Exception as e:
                 print(f"❌ Statement/history error: {type(e).__name__}: {e}")
-                send_whatsapp(sender_phone, "❌ Khalad ayaa dhacay markii la diyaarinayay statement-ka. Hubi payments table iyo permissions-ka Supabase.")
+                send_whatsapp(sender_phone, "❌ Khalad ayaa dhacay markii la diyaarinayay statement-ka. Hubi payments table iyo permissions-ka.")
                 failed_inserts.append({"name": name, "reason": f"History error: {type(e).__name__}: {e}"})
         
         elif action == "REPORT":
@@ -1532,7 +1530,7 @@ async def whatsapp_webhook(request: Request):
                 send_whatsapp(sender_phone, message)
             except Exception as e:
                 print(f"❌ Report error: {type(e).__name__}: {e}")
-                send_whatsapp(sender_phone, "❌ Warbixinta lama diyaarin. Hubi payments table iyo permissions-ka Supabase.")
+                send_whatsapp(sender_phone, "❌ Warbixinta lama diyaarin. Hubi payments table iyo permissions-ka.")
                 failed_inserts.append({"name": "REPORT", "reason": str(e)})
         
         elif action == "EXPORT":
@@ -1544,7 +1542,7 @@ async def whatsapp_webhook(request: Request):
                 )
                 debts_to_export = all_debts_result.data or []
                 if not debts_to_export:
-                    send_whatsapp(sender_phone, "✅ Ma jiraan deymo la dhoofin karo.")
+                    send_whatsapp(sender_phone, "✅ Ma jiraan deymo la soo saari karo.")
                     continue
 
                 csv_buffer = StringIO()
@@ -1561,10 +1559,10 @@ async def whatsapp_webhook(request: Request):
                     "text/csv", f"📥 Deymaha la dhoofiyay: {len(debts_to_export)} diiwaan"
                 )
                 if not sent:
-                    send_whatsapp(sender_phone, "❌ Faylka CSV lama dirin. Hubi Green-API sendFileByUpload iyo server logs-ka.")
+                    send_whatsapp(sender_phone, "❌ Faylka CSV lama dirin.")
             except Exception as e:
                 print(f"❌ Export error: {type(e).__name__}: {e}")
-                send_whatsapp(sender_phone, "❌ Dhoofinta CSV way fashilantay. Hubi server logs-ka.")
+                send_whatsapp(sender_phone, "❌ Dhoofinta CSV way fashilantay.")
                 failed_inserts.append({"name": "EXPORT", "reason": str(e)})
 
     # Send confirmation for ADD actions
@@ -1721,7 +1719,7 @@ async def evening_checkin(request: Request):
 
             if payments:
                 lines.append("")
-                lines.append("💵 *Daynta maanta kuusoo xarootay:*")
+                lines.append("💵 *Daymaha maanta kuusoo xarooday:*")
 
                 for payment in payments:
                     debtor_result = (
