@@ -925,7 +925,10 @@ async def whatsapp_webhook(request: Request):
         if action == "ADD":
             try:
                 if amount is None and not new_phone:
-                    send_whatsapp(sender_phone, "⚠️ ma cada cadadka deyntu, fadlan xaqiiji)
+                    send_whatsapp(
+    sender_phone,
+    "⚠️ Ma cadda cadadka deynta, fadlan xaqiiji."
+)
                     failed_inserts.append({"name": name, "reason": "Amount missing for new debt"})
                     continue
                 if not promised_date and days_until_due is not None:
