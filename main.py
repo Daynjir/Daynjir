@@ -656,6 +656,7 @@ async def whatsapp_webhook(request: Request):
                             sender_phone,
                             f"✅ Ma jiraan deymo balanteedu tahay {filter_date}."
                         )
+                        send_due_list_followup(sender_phone)
                     else:
                         send_whatsapp(
                             sender_phone,
