@@ -1165,10 +1165,10 @@ async def whatsapp_webhook(request: Request):
 
             report = (
                 "📣 *NATIIJADA XUSUUSINTA*\n\n"
-                f"✅ Green-API aqbashay: {sent_count}\n"
-                f"⚠️ La booday (deyn la bixiyey/lambar maqan): {skipped_count}\n"
-                f"❌ Codsiyada dirista fashilmay: {failed_count}\n\n"
-                "Ogow: aqbalidda Green-API ma aha xaqiijin in qofku akhriyey fariinta."
+                f"✅ Tirada xusuusinta ladiray: {sent_count}\n"
+                f"⚠️ Tiarada Laga booday (deyn la bixiyey/lambar maqan): {skipped_count}\n"
+                f"❌ Tirada fashilmay: {failed_count}\n\n"
+                "Ogow: in xusuusinta la diray ma xaqiijinayso in qofku akhriyey fariinta."
             )
             send_whatsapp(sender_phone, report)
             print(f"📣 Reminder batch complete: sent={sent_count}, skipped={skipped_count}, failed={failed_count}")
