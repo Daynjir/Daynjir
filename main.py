@@ -127,22 +127,27 @@ def format_reminder_list(debtors, missing_phone_count=0):
             f"ℹ️ {missing_phone_count} Lanbarkan ma saxna ama laguma isticmaalo WhatsApp.",
         ])
     return "\n".join(lines)
-
-
-
 def build_debt_reminder(debtor, shopkeeper_name, shopkeeper_phone):
     name = str(debtor.get("name") or "Macmiil").strip()
     balance = float(debtor.get("amount") or 0)
 
-    return (
-        f"Asc {name},\n\n"
-        f"Fariintan waxaa kuu soo diray {shopkeeper_name} "
-        f"({shopkeeper_phone}).\n\n"
-        f"Waxaan si xushmad leh kuu xusuusinaynaa in aad "
-        f"soo bixiso lacagtii daynta ahayd oo dhan: *${balance:.2f}*.\n\n"
-        "Fadlan si dhakhso ah usoo dir. "
-        "Mahadsanid."
+    shopkeeper_name = str(shopkeeper_name or "").strip()
+    shopkeeper_phone = str(shopkeeper_phone or "").strip()
+
+    sender = (
+        f"{shopkeeper_name} (+{shopkeeper_phone})"
+        if shopkeeper_name
+        else f"+{shopkeeper_phone}"
     )
+
+    return (
+        f"Asc {name},\n"
+        f"Waxaan si xushmad leh kuu xusuusinaynaa in aad soo bixiso "
+        f"lacagtii daynta ahayd oo dhan: *${balance:.2f}*.\n"
+        f"Fariintan waxaa kuu soo diray *{sender}*.\n"
+        f"Fadlan sida ugu dhakhsaha badan u bixi lacagta. Mahadsanid."
+    )
+
 
 # Securely load credentials from Render's Environment panel variables
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
@@ -991,7 +996,7 @@ async def whatsapp_webhook(request: Request):
     try:
         sk_query = (
             supabase.table("shopkeepers")
-            .select("id, phone_number, approval_status")
+            .select("id, phone_number, name, approval_status")
             .eq("phone_number", sender_phone)
             .execute()
         )
@@ -1159,7 +1164,14 @@ async def whatsapp_webhook(request: Request):
                         skipped_count += 1
                         continue
 
-                    send_ok = send_whatsapp(target_phone, build_debt_reminder(fresh))
+                    send_ok = send_whatsapp(
+                        target_phone,
+                        build_debt_reminder(
+                            fresh,
+                            shopkeeper.get("name"),
+                            shopkeeper.get("phone_number") or sender_phone,
+                        ),
+                    )
                     if send_ok is False:
                         failed_count += 1
                     else:
