@@ -39,6 +39,106 @@ app = FastAPI()
 # by sending "PDF" as a follow-up WhatsApp message. Cleared on server restart.
 LAST_HISTORY_REQUESTS = {}
 
+# Temporary manual reminder workflow. Sessions expire after 15 minutes and are
+# cleared before sending so a repeated "HAA DIR" cannot resend the same batch.
+REMINDER_SESSIONS = {}
+REMINDER_SESSION_TTL = timedelta(minutes=15)
+DEFAULT_COUNTRY_CODE = re.sub(r"\D", "", os.getenv("DEFAULT_COUNTRY_CODE", ""))
+
+
+def normalize_reminder_phone(raw_phone):
+    """Return a Green-API-ready international number, or None if ambiguous."""
+    if not raw_phone:
+        return None
+    raw = str(raw_phone).strip()
+    digits = re.sub(r"\D", "", raw)
+    if raw.startswith("00") and digits.startswith("00"):
+        digits = digits[2:]
+    elif raw.startswith("+"):
+        pass
+    elif digits.startswith("0") and DEFAULT_COUNTRY_CODE:
+        digits = DEFAULT_COUNTRY_CODE + digits.lstrip("0")
+    elif len(digits) < 10 and DEFAULT_COUNTRY_CODE:
+        digits = DEFAULT_COUNTRY_CODE + digits
+    # Without a configured default country code, short/local numbers are
+    # excluded rather than risking sending a reminder to the wrong person.
+    if not (10 <= len(digits) <= 15):
+        return None
+    return digits
+
+
+def is_reminder_start_command(text):
+    return bool(re.fullmatch(
+        r"\s*(?:xusuusin|xusuusi|xasuusin|remind|remind debtors|payment reminders)\s*[.!]?\s*",
+        str(text or ""),
+        flags=re.IGNORECASE,
+    ))
+
+
+def is_reminder_cancel_command(text):
+    return bool(re.fullmatch(
+        r"\s*(?:jooji|jooji xusuusinta|cancel|stop)\s*[.!]?\s*",
+        str(text or ""),
+        flags=re.IGNORECASE,
+    ))
+
+
+def is_reminder_confirm_command(text):
+    return bool(re.fullmatch(
+        r"\s*(?:haa dir|haa|dir|send|confirm|yes|confirm send)\s*[.!]?\s*",
+        str(text or ""),
+        flags=re.IGNORECASE,
+    ))
+
+
+def parse_reminder_selection(text, count):
+    """Parse e.g. '1,3,5' and reject zero, out-of-range, or malformed input."""
+    raw = str(text or "").strip()
+    if not raw or not re.fullmatch(r"\d+(?:\s*[,; ]\s*\d+)*", raw):
+        return None
+    try:
+        numbers = [int(part) for part in re.split(r"[,;\s]+", raw) if part]
+    except ValueError:
+        return None
+    if not numbers or any(number < 1 or number > count for number in numbers):
+        return None
+    return list(dict.fromkeys(numbers))
+
+
+def format_reminder_list(debtors, missing_phone_count=0):
+    lines = [
+        "📣 *XUSUUSINTA DEYNTA*",
+        "Dooro lambarrada macaamiisha aad rabto in la xusuusiyo.",
+        "",
+    ]
+    for index, debtor in enumerate(debtors, start=1):
+        lines.append(
+            f"{index}. {debtor.get('name') or 'Magac la’aan'} — "
+            f"${float(debtor.get('amount') or 0):.2f}"
+        )
+    lines.extend([
+        "",
+        "✍️ Tusaale: *1,3,5*",
+        "⏹️ Jooji: *JOOJI*",
+    ])
+    if missing_phone_count:
+        lines.extend([
+            "",
+            f"ℹ️ {missing_phone_count} Lanbarkan ma saxna ama laguma isticmaalo WhatsApp.",
+        ])
+    return "\n".join(lines)
+
+
+def build_debt_reminder(debtor):
+    name = str(debtor.get("name") or "Macmiil").strip()
+    balance = float(debtor.get("amount") or 0)
+    return (
+        f"Asc {name},\n\n"
+        f"Waxaan si xushmad leh kuu xusuusinaynaa in aad soo bixiso lacagtii daynta ahayd oo dhan: *${balance:.2f}*.\n\n"
+        "Fadlan si dhakhso ah usoo dir. "
+        "Mahadsanid."
+    )
+
 # Securely load credentials from Render's Environment panel variables
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
@@ -155,7 +255,7 @@ def send_whatsapp(to_phone: str, message: str):
     clean_phone = str(to_phone).lstrip("+").split("@")[0].strip()
     if not GREEN_API_TOKEN:
         print("❌ GREEN_API_TOKEN is not configured in environment variables")
-        return
+        return False
     url = f"{GREEN_API_BASE}/waInstance{INSTANCE_ID}/sendMessage/{GREEN_API_TOKEN}"
     chat_id = f"{clean_phone}@c.us"
     payload = {"chatId": chat_id, "message": message}
@@ -166,8 +266,16 @@ def send_whatsapp(to_phone: str, message: str):
     try:
         res = requests.post(url, json=payload, timeout=10)
         print(f"📡 Green-API Status: {res.status_code} - Response: {res.text}")
+        if not res.ok:
+            return False
+        try:
+            body = res.json()
+            return bool(body.get("idMessage")) or body.get("status") == "success"
+        except Exception:
+            return res.ok
     except Exception as e:
         print(f"❌ Error sending WhatsApp: {e}")
+        return False
 
 def send_whatsapp_file(to_phone: str, filename: str, content: bytes, mime_type: str, caption: str = ""):
     """Send a generated file through Green-API's sendFileByUpload endpoint."""
@@ -903,6 +1011,174 @@ async def whatsapp_webhook(request: Request):
     except Exception as db_err:
         print(f"❌ DATABASE ERROR (Shopkeepers Lookup): {db_err}")
         return {"status": "shopkeeper_db_error"}
+
+    # Manual debt-reminder workflow: fully rule-based, no Groq request.
+    # Start: XUSUUSIN -> numbered unpaid-debtor list -> "1,3" -> confirmation.
+    reminder_text = str(message_text or "").strip()
+    reminder_state = REMINDER_SESSIONS.get(sender_phone)
+
+    if reminder_state:
+        expires_at = reminder_state.get("expires_at")
+        if not expires_at or datetime.now(timezone.utc) > expires_at:
+            REMINDER_SESSIONS.pop(sender_phone, None)
+            reminder_state = None
+            if is_reminder_confirm_command(reminder_text) or re.fullmatch(
+                r"\s*\d+(?:\s*[,; ]\s*\d+)*\s*", reminder_text
+            ):
+                send_whatsapp(sender_phone, "⌛ Xulashadii xusuusintu way dhacday. Soo qor *XUSUUSIN* si aad mar kale u bilowdo.")
+                return {"status": "reminder_session_expired"}
+
+    if is_reminder_start_command(reminder_text):
+        try:
+            debtor_result = (
+                supabase.table("debtors")
+                .select("id, name, amount, phone_number, is_paid")
+                .eq("shopkeeper_id", shopkeeper_id)
+                .eq("is_paid", False)
+                .order("name")
+                .execute()
+            )
+            all_unpaid = [
+                row for row in (debtor_result.data or [])
+                if float(row.get("amount") or 0) > 0
+            ]
+            eligible = []
+            missing_phone_count = 0
+            for row in all_unpaid:
+                normalized_phone = normalize_reminder_phone(row.get("phone_number"))
+                if not normalized_phone:
+                    missing_phone_count += 1
+                    continue
+                prepared = dict(row)
+                prepared["_reminder_phone"] = normalized_phone
+                eligible.append(prepared)
+
+            if not eligible:
+                send_whatsapp(
+                    sender_phone,
+                    "ℹ️ Ma jiro macmiil deyn lagu leeyahay oo leh lambar WhatsApp oo sax ah. "
+                    "Hubi in macaamiisha lagu kaydiyey phone number caalami ah, ama deji DEFAULT_COUNTRY_CODE gudaha Render."
+                )
+                return {"status": "no_reminder_eligible_debtors"}
+
+            REMINDER_SESSIONS[sender_phone] = {
+                "shopkeeper_id": shopkeeper_id,
+                "stage": "selecting",
+                "debtors": eligible,
+                "selected": [],
+                "expires_at": datetime.now(timezone.utc) + REMINDER_SESSION_TTL,
+            }
+            send_whatsapp(sender_phone, format_reminder_list(eligible, missing_phone_count))
+            print(f"📣 Reminder selection started: shopkeeper={shopkeeper_id}, eligible={len(eligible)}, missing_phone={missing_phone_count}")
+            return {"status": "reminder_selection_started", "eligible": len(eligible)}
+        except Exception as reminder_err:
+            print(f"❌ REMINDER LIST ERROR: {reminder_err}")
+            send_whatsapp(sender_phone, "❌ Liiska xusuusinta lama soo saari karin. Fadlan mar kale isku day.")
+            return {"status": "reminder_list_error"}
+
+    if reminder_state and is_reminder_cancel_command(reminder_text):
+        REMINDER_SESSIONS.pop(sender_phone, None)
+        send_whatsapp(sender_phone, "✅ Xusuusintii waa la joojiyey. Wax fariin ah looma dirin macaamiisha.")
+        return {"status": "reminder_cancelled"}
+
+    if reminder_state and reminder_state.get("stage") == "selecting":
+        selected_numbers = parse_reminder_selection(
+            reminder_text, len(reminder_state.get("debtors", []))
+        )
+        if selected_numbers:
+            selected_debtors = [
+                reminder_state["debtors"][number - 1]
+                for number in selected_numbers
+            ]
+            reminder_state["selected"] = selected_numbers
+            reminder_state["stage"] = "confirming"
+            reminder_state["expires_at"] = datetime.now(timezone.utc) + REMINDER_SESSION_TTL
+            preview_lines = ["🔎 *XUSUUSINTA LA DOORTAY*", ""]
+            for debtor in selected_debtors:
+                preview_lines.append(
+                    f"• {debtor.get('name')} — ${float(debtor.get('amount') or 0):.2f}"
+                )
+            total = sum(float(row.get("amount") or 0) for row in selected_debtors)
+            preview_lines.extend([
+                "",
+                f"👥 Tirada: {len(selected_debtors)} macmiil",
+                f"💰 Wadarta deynta: ${total:.2f}",
+                "",
+                "Haddii aad hubisay, soo qor *HAA DIR* si fariimaha loo diro.",
+                "Haddii kale soo qor *JOOJI*.",
+                "⏳ Xulashadani waxay dhacaysaa 15 daqiiqo gudahood.",
+            ])
+            send_whatsapp(sender_phone, "\n".join(preview_lines))
+            return {"status": "reminder_selection_confirm_required", "selected": len(selected_debtors)}
+        if re.fullmatch(r"\s*\d+(?:\s*[,; ]\s*\d+)*\s*", reminder_text):
+            send_whatsapp(
+                sender_phone,
+                f"❌ Xulasho khaldan. Geli lambarro u dhexeeya 1 iyo {len(reminder_state.get('debtors', []))}, tusaale *1,3*; ama soo qor *JOOJI*."
+            )
+            return {"status": "invalid_reminder_selection"}
+        # A non-selection message exits this temporary flow and is handled
+        # normally by Daynjir, so ordinary debt operations still work.
+        REMINDER_SESSIONS.pop(sender_phone, None)
+        reminder_state = None
+
+    if reminder_state and reminder_state.get("stage") == "confirming":
+        if is_reminder_confirm_command(reminder_text):
+            # Pop before network calls so a repeated confirmation cannot resend.
+            state = REMINDER_SESSIONS.pop(sender_phone, None)
+            if not state or state.get("shopkeeper_id") != shopkeeper_id:
+                send_whatsapp(sender_phone, "⌛ Xulashadu ma jirto ama way dhacday. Soo qor *XUSUUSIN* mar kale.")
+                return {"status": "reminder_state_missing"}
+
+            sent_count = 0
+            skipped_count = 0
+            failed_count = 0
+            for number in state.get("selected") or []:
+                original = state["debtors"][number - 1]
+                try:
+                    fresh_result = (
+                        supabase.table("debtors")
+                        .select("id, name, amount, phone_number, is_paid")
+                        .eq("id", original["id"])
+                        .eq("shopkeeper_id", shopkeeper_id)
+                        .execute()
+                    )
+                    if not fresh_result.data:
+                        skipped_count += 1
+                        continue
+                    fresh = fresh_result.data[0]
+                    if fresh.get("is_paid") is True or float(fresh.get("amount") or 0) <= 0:
+                        skipped_count += 1
+                        continue
+                    target_phone = normalize_reminder_phone(fresh.get("phone_number"))
+                    if not target_phone:
+                        skipped_count += 1
+                        continue
+
+                    send_ok = send_whatsapp(target_phone, build_debt_reminder(fresh))
+                    if send_ok is False:
+                        failed_count += 1
+                    else:
+                        sent_count += 1
+                except Exception as send_err:
+                    failed_count += 1
+                    print(f"❌ REMINDER SEND ERROR for debtor id={original.get('id')}: {send_err}")
+
+            report = (
+                "📣 *NATIIJADA XUSUUSINTA*\n\n"
+                f"✅ Green-API aqbashay: {sent_count}\n"
+                f"⚠️ La booday (deyn la bixiyey/lambar maqan): {skipped_count}\n"
+                f"❌ Codsiyada dirista fashilmay: {failed_count}\n\n"
+                "Ogow: aqbalidda Green-API ma aha xaqiijin in qofku akhriyey fariinta."
+            )
+            send_whatsapp(sender_phone, report)
+            print(f"📣 Reminder batch complete: sent={sent_count}, skipped={skipped_count}, failed={failed_count}")
+            return {"status": "reminder_batch_complete", "accepted": sent_count, "skipped": skipped_count, "failed": failed_count}
+
+        send_whatsapp(
+            sender_phone,
+            "⚠️ Xusuusintu weli ma dirmin. Soo qor *HAA DIR* si aad u xaqiijiso, ama *JOOJI* si aad u baajiso."
+        )
+        return {"status": "reminder_waiting_for_confirmation"}
 
     # A standalone PDF command exports the most recently requested statement.
     pdf_only_requested = bool(re.fullmatch(
@@ -1669,11 +1945,12 @@ async def whatsapp_webhook(request: Request):
                 paid_count = sum(1 for d in search_matches if d.get("is_paid"))
                 lines = []
                 for i, debt in enumerate(sorted(search_matches, key=lambda d: str(d.get("created_at") or ""), reverse=True), 1):
-                    status = "✅ LA BIXIYAY" if debt.get("is_paid") else "⏳ WELI LAMA BIXIN"
-                    lines.append(f"{i}. ${float(debt.get('amount') or 0):.2f} — Taariikhda Ballanta: {debt.get('promised_date') or 'lama gelin'} — {status}")
+                    status = "✅ LA BIXIYAY" if debt.get("is_paid") else "⏳ WELI LAGUMA BIXIN"
+                    lines.append(f"{i}. ${float(debt.get('amount') or 0):.2f} — Ballan: {debt.get('promised_date') or 'lama gelin'} — {status}")
                 message = (
                     f"🔎 *Natiijada raadinta: {matched_name}*\n\n"
-                    f"💰 Total: *${total_debt:.2f}*\n"
+                    f"💰 Wadarta deynta harsan: *${total_debt:.2f}*\n"
+                    f"⏳ Deymo aan la bixin: {unpaid_count} | ✅ La bixiyay: {paid_count}\n\n"
                     + "\n".join(lines)
                 )
                 send_whatsapp(sender_phone, message)
@@ -1720,10 +1997,10 @@ async def whatsapp_webhook(request: Request):
                         lines.append(
                             f"*Deyn #{index}* — {str(debt.get('created_at') or '')[:10] or 'Taariikh lama hayo'}"
                         )
-                        lines.append(f"  • Hadhaaga hadda: ${max(balance, 0.0):.2f}")
+                        lines.append(f"  • Haraaga hadda: ${max(balance, 0.0):.2f}")
                         due_date = debt.get("promised_date")
                         lines.append(f"  • Ballan: {due_date if due_date else 'Lama cayimin'}")
-                        lines.append(f"  • Xaalad: {'✅ LA BIXIYAY' if debt_paid else '⏳ WELI LAMA BIXIN'}")
+                        lines.append(f"  • Xaalad: {'✅ LA BIXIYAY' if debt_paid else '⏳ WELI LAGAMA BIXIN'}")
 
                         debt_payments = payments_by_debt.get(str(debt.get("id")), [])
                         if debt_payments:
@@ -1742,8 +2019,8 @@ async def whatsapp_webhook(request: Request):
                         total_paid = 0.0
                     lines.extend([
                         "━━━━━━━━━━━━━━",
-                        f"💵 *Wadarta lacag bixinta:* ${total_paid:.2f}",
-                        f"📌 *Wadarta hadhaaga deynta:* ${total_balance:.2f}",
+                        f"💵 *Wadarta lacagta la bixiyay ee diiwaangashan:* ${total_paid:.2f}",
+                        f"📌 *Wadarta haraaga deynta:* ${total_balance:.2f}",
                         "_Warbixintani waxay ku salaysan tahay diiwaannada hadda ku jira nidaamka._"
                     ])
                     message = "\n".join(lines)
