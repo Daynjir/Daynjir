@@ -1720,10 +1720,10 @@ async def whatsapp_webhook(request: Request):
                         lines.append(
                             f"*Deyn #{index}* — {str(debt.get('created_at') or '')[:10] or 'Taariikh lama hayo'}"
                         )
-                        lines.append(f"  • Haraaga hadda: ${max(balance, 0.0):.2f}")
+                        lines.append(f"  • Hadhaaga hadda: ${max(balance, 0.0):.2f}")
                         due_date = debt.get("promised_date")
                         lines.append(f"  • Ballan: {due_date if due_date else 'Lama cayimin'}")
-                        lines.append(f"  • Xaalad: {'✅ LA BIXIYAY' if debt_paid else '⏳ WELI LAGAMA BIXIN'}")
+                        lines.append(f"  • Xaalad: {'✅ LA BIXIYAY' if debt_paid else '⏳ WELI LAMA BIXIN'}")
 
                         debt_payments = payments_by_debt.get(str(debt.get("id")), [])
                         if debt_payments:
@@ -1742,8 +1742,8 @@ async def whatsapp_webhook(request: Request):
                         total_paid = 0.0
                     lines.extend([
                         "━━━━━━━━━━━━━━",
-                        f"💵 *Wadarta lacagta la bixiyay ee diiwaangashan:* ${total_paid:.2f}",
-                        f"📌 *Wadarta haraaga deynta:* ${total_balance:.2f}",
+                        f"💵 *Wadarta lacag bixinta:* ${total_paid:.2f}",
+                        f"📌 *Wadarta hadhaaga deynta:* ${total_balance:.2f}",
                         "_Warbixintani waxay ku salaysan tahay diiwaannada hadda ku jira nidaamka._"
                     ])
                     message = "\n".join(lines)
