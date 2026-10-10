@@ -2121,12 +2121,11 @@ async def whatsapp_webhook(request: Request):
 
                 message = (
                     f"{title}\n\n"
-                    f"🆕 Diiwaanno deyn cusub ah muddadan: {len(new_debts)}\n"
-                    f"💵 Lacag la qabtay muddadan (payments table): ${period_collected:.2f}\n"
-                    f"📌 Haraaga guud ee deynta hadda: ${total_outstanding:.2f}\n"
+                    f"🆕 Tirada Deymaha cusub ee la diwaangeliyay: {len(new_debts)}\n"
+                    f"💵 Lacagta soo xarootay (payments table): ${period_collected:.2f}\n"
+                    f"📌 Hadhaaga guud ee deynta hadda: ${total_outstanding:.2f}\n"
                     f"⚠️ Deyn ballan dhaaftay: {len(overdue)} macaamiil / ${sum(float(d.get('amount') or 0) for d in overdue):.2f}\n"
                     f"📅 Ballan maanta: {len(due_today)} macaamiil\n\n"
-                    "Fiiro gaar ah: lacagaha la qabtay waxay ku salaysan yihiin diiwaannada payments; deymo hore oo aan lahayn diiwaan lacag-bixin waxaa laga yaabaa in taariikhdoodu dhammaystirnayn."
                 )
                 send_whatsapp(sender_phone, message)
             except Exception as e:
