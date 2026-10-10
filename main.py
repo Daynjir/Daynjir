@@ -35,6 +35,10 @@ def today_eat():
 # Setup the core application framework
 app = FastAPI()
 
+# Remembers the most recent customer statement so the user can request its PDF
+# by sending "PDF" as a follow-up WhatsApp message. Cleared on server restart.
+LAST_HISTORY_REQUESTS = {}
+
 # Securely load credentials from Render's Environment panel variables
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
@@ -899,74 +903,100 @@ async def whatsapp_webhook(request: Request):
     except Exception as db_err:
         print(f"❌ DATABASE ERROR (Shopkeepers Lookup): {db_err}")
         return {"status": "shopkeeper_db_error"}
-    
+
+    # A standalone PDF command exports the most recently requested statement.
+    pdf_only_requested = bool(re.fullmatch(
+        r"\s*(?:pdf|soo\s+dir\s+pdf|pdf\s+soo\s+dir|pdf\s+xisaabta|xisaabta\s+pdf)\s*[.!]?\s*",
+        message_text,
+        flags=re.IGNORECASE,
+    ))
+    pdf_customer_name = None
+    if pdf_only_requested:
+        previous_statement = LAST_HISTORY_REQUESTS.get(sender_phone)
+        if not previous_statement or previous_statement.get("shopkeeper_id") != shopkeeper_id:
+            send_whatsapp(
+                sender_phone,
+                "ℹ️ Marka hore codso xisaabta macmiilka, tusaale: *Bagadh Mamulka taariikh*. "
+                "Kadib soo qor *PDF* si aan PDF ugu diro."
+            )
+            return {"status": "no_recent_statement_for_pdf"}
+        pdf_customer_name = previous_statement.get("customer_name")
+        if not pdf_customer_name:
+            send_whatsapp(sender_phone, "❌ Magaca macmiilka lama helin. Fadlan mar kale codso xisaabtiisa.")
+            return {"status": "missing_pdf_customer_name"}
+        print(f"📄 PDF-only request detected for {pdf_customer_name!r}")
+
     today_str = today_eat().isoformat()
     dynamic_system_prompt = f"{SYSTEM_PROMPT}\nToday's date is strictly: {today_str}. Use this to calculate calendar targets or relative days offsets like 'berri'."
     
-    try:
-        chat_completion = groq_client.chat.completions.create(
-            messages=[{"role": "system", "content": dynamic_system_prompt}, {"role": "user", "content": message_text}],
-            model="openai/gpt-oss-20b",
-            temperature=0.0
-        )
+    if pdf_only_requested:
+        entries = [{"action": "HISTORY", "customer_name": pdf_customer_name}]
+        print(f"📄 Skipping Groq for PDF follow-up; using saved customer {pdf_customer_name!r}")
+    else:
         try:
-            ai_response = chat_completion.choices[0].message.content.strip()
-        except Exception as parse_err:
-            print(f"⚠️ Direct extraction failed, casting raw string: {parse_err}")
-            ai_response = str(chat_completion).strip()
-        print(f"🤖 Groq AI Processed Output: {ai_response}")
-        json_match = re.search(r'[\[{].*[\]}]', ai_response, re.DOTALL)
-        if not json_match:
-            raise ValueError("No JSON found in Groq output")
-        parsed = json.loads(json_match.group())
-        entries = [parsed] if isinstance(parsed, dict) else parsed
-        if not entries:
-            raise ValueError("Empty Groq entries")
-    except Exception as ai_err:
-        # Groq is optional: when rate-limited or unavailable, use conservative
-        # local rules and continue through the SAME Supabase transaction logic.
-        error_text = str(ai_err)
-        is_rate_limited = (
-            "429" in error_text or "rate_limit" in error_text.lower()
-            or "RateLimitError" in type(ai_err).__name__
-        )
-        print(f"❌ Groq request/parse failed: {error_text}")
-        entries = local_fallback_parse(message_text)
-        if entries:
-            print(f"🛟 Local fallback parsed command: {entries}")
-            print("🛟 Continuing through shared Supabase transaction logic; Groq will be tried again on the next message.")
-        else:
-            # A plain customer name is a safe SEARCH only if it matches this
-            # shopkeeper's own records; unsupported text must never create debt.
-            raw_query = str(message_text or "").strip()
-            has_date_words = bool(re.search(
-                r"\b(?:today|tomorrow|maanta|berri|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b|\b\d{4}-\d{1,2}-\d{1,2}\b|\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b",
-                raw_query, flags=re.I
-            ))
-            if raw_query and not has_date_words and not re.search(r"[,$]\s*\d|\d\s*\$", raw_query):
-                try:
-                    fallback_matches = find_debtor_matches(shopkeeper_id, raw_query)
-                except Exception as fallback_err:
-                    print(f"⚠️ Local customer-search fallback failed: {fallback_err}")
-                    fallback_matches = []
-                if fallback_matches:
-                    entries = [{"action": "SEARCH", "customer_name": raw_query}]
-                    print(f"🛟 Local fallback routing known customer name to SEARCH: {raw_query!r}")
-        if not entries:
-            if is_rate_limited:
-                reply = (
-                    "⏳ AI-gu wuxuu gaaray xadka isticmaalka, fariintana muu fahmin.\n\n"
-                    "Fadlan isticmaal qaabkan sida: si aad qof cusub ugu darto MAGACA $lacagta, edit MAGACA $lacagta, "
-                    "delete MAGACA, ama search MAGACA."
-                )
-                send_whatsapp(sender_phone, reply)
-                return {"status": "groq_rate_limited_unparsed"}
-            send_whatsapp(
-                sender_phone,
-                "⚠️ AI-gu hadda ma shaqaynayo, fariintana si ammaan ah looma fahmin. "
-                "Fadlan isticmaal qaab cad sida MAGACA $10 ama search MAGACA. Fariinta lama diiwaangelin."
+            chat_completion = groq_client.chat.completions.create(
+                messages=[{"role": "system", "content": dynamic_system_prompt}, {"role": "user", "content": message_text}],
+                model="openai/gpt-oss-20b",
+                temperature=0.0
             )
-            return {"status": "groq_error_unparsed"}
+            try:
+                ai_response = chat_completion.choices[0].message.content.strip()
+            except Exception as parse_err:
+                print(f"⚠️ Direct extraction failed, casting raw string: {parse_err}")
+                ai_response = str(chat_completion).strip()
+            print(f"🤖 Groq AI Processed Output: {ai_response}")
+            json_match = re.search(r'[\[{].*[\]}]', ai_response, re.DOTALL)
+            if not json_match:
+                raise ValueError("No JSON found in Groq output")
+            parsed = json.loads(json_match.group())
+            entries = [parsed] if isinstance(parsed, dict) else parsed
+            if not entries:
+                raise ValueError("Empty Groq entries")
+        except Exception as ai_err:
+            # Groq is optional: when rate-limited or unavailable, use conservative
+            # local rules and continue through the SAME Supabase transaction logic.
+            error_text = str(ai_err)
+            is_rate_limited = (
+                "429" in error_text or "rate_limit" in error_text.lower()
+                or "RateLimitError" in type(ai_err).__name__
+            )
+            print(f"❌ Groq request/parse failed: {error_text}")
+            entries = local_fallback_parse(message_text)
+            if entries:
+                print(f"🛟 Local fallback parsed command: {entries}")
+                print("🛟 Continuing through shared Supabase transaction logic; Groq will be tried again on the next message.")
+            else:
+                # A plain customer name is a safe SEARCH only if it matches this
+                # shopkeeper's own records; unsupported text must never create debt.
+                raw_query = str(message_text or "").strip()
+                has_date_words = bool(re.search(
+                    r"\b(?:today|tomorrow|maanta|berri|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b|\b\d{4}-\d{1,2}-\d{1,2}\b|\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b",
+                    raw_query, flags=re.I
+                ))
+                if raw_query and not has_date_words and not re.search(r"[,$]\s*\d|\d\s*\$", raw_query):
+                    try:
+                        fallback_matches = find_debtor_matches(shopkeeper_id, raw_query)
+                    except Exception as fallback_err:
+                        print(f"⚠️ Local customer-search fallback failed: {fallback_err}")
+                        fallback_matches = []
+                    if fallback_matches:
+                        entries = [{"action": "SEARCH", "customer_name": raw_query}]
+                        print(f"🛟 Local fallback routing known customer name to SEARCH: {raw_query!r}")
+            if not entries:
+                if is_rate_limited:
+                    reply = (
+                        "⏳ AI-gu wuxuu gaaray xadka isticmaalka, fariintana si ammaan ah looma fahmin.\n\n"
+                        "Fadlan isticmaal qaab cad sida: MAGACA $10, edit MAGACA $10, "
+                        "delete MAGACA, ama search MAGACA. Fariinta lama diiwaangelin."
+                    )
+                    send_whatsapp(sender_phone, reply)
+                    return {"status": "groq_rate_limited_unparsed"}
+                send_whatsapp(
+                    sender_phone,
+                    "⚠️ AI-gu hadda ma shaqaynayo, fariintana si ammaan ah looma fahmin. "
+                    "Fadlan isticmaal qaab cad sida MAGACA $10 ama search MAGACA. Fariinta lama diiwaangelin."
+                )
+                return {"status": "groq_error_unparsed"}
 
     # Both Groq and local fallback use the same downstream business rules.
     # In particular, ordinary amounts add; explicit edit/ka dhig replaces.
@@ -1639,12 +1669,11 @@ async def whatsapp_webhook(request: Request):
                 paid_count = sum(1 for d in search_matches if d.get("is_paid"))
                 lines = []
                 for i, debt in enumerate(sorted(search_matches, key=lambda d: str(d.get("created_at") or ""), reverse=True), 1):
-                    status = "✅ LA BIXIYAY" if debt.get("is_paid") else "⏳ WELI LAGUMA BIXIN"
-                    lines.append(f"{i}. ${float(debt.get('amount') or 0):.2f} — Ballan: {debt.get('promised_date') or 'lama gelin'} — {status}")
+                    status = "✅ LA BIXIYAY" if debt.get("is_paid") else "⏳ WELI LAMA BIXIN"
+                    lines.append(f"{i}. ${float(debt.get('amount') or 0):.2f} — Taariikhda Ballanta: {debt.get('promised_date') or 'lama gelin'} — {status}")
                 message = (
                     f"🔎 *Natiijada raadinta: {matched_name}*\n\n"
-                    f"💰 Wadarta deynta harsan: *${total_debt:.2f}*\n"
-                    f"⏳ Deymo aan la bixin: {unpaid_count} | ✅ La bixiyay: {paid_count}\n\n"
+                    f"💰 Total: *${total_debt:.2f}*\n"
                     + "\n".join(lines)
                 )
                 send_whatsapp(sender_phone, message)
@@ -1721,21 +1750,34 @@ async def whatsapp_webhook(request: Request):
                     # WhatsApp has a message-size limit; trim long statements safely.
                     if len(message) > 6000:
                         message = message[:5850] + "\n\n… Liiska waa la soo gaabiyay; macmiilku wuxuu leeyahay diiwaanno badan."
-                    send_whatsapp(sender_phone, message)
-                    try:
-                        pdf_bytes = build_statement_pdf(
-                            history_matches[0].get("name", name), history_matches,
-                            payments_by_debt, total_paid, total_balance
-                        )
-                        send_whatsapp_file(
+                    matched_customer_name = history_matches[0].get("name", name)
+                    # Save the statement context for a follow-up "PDF" command.
+                    LAST_HISTORY_REQUESTS[sender_phone] = {
+                        "shopkeeper_id": shopkeeper_id,
+                        "customer_name": matched_customer_name,
+                    }
+
+                    if not pdf_only_requested:
+                        send_whatsapp(
                             sender_phone,
-                            f"daynjir_statement_{re.sub(r'[^A-Za-z0-9_-]+', '_', str(history_matches[0].get('name', 'customer')))}.pdf",
-                            pdf_bytes,
-                            "application/pdf",
-                            "📄 Statement PDF / Xisaabta macmiilka"
+                            message + "\n\n📎 Haddii aad PDF ku rabto xisaabta macmiilkan, soo qor *PDF*."
                         )
-                    except Exception as pdf_error:
-                        print(f"⚠️ PDF statement generation failed: {type(pdf_error).__name__}: {pdf_error}")
+                    else:
+                        try:
+                            pdf_bytes = build_statement_pdf(
+                                matched_customer_name, history_matches,
+                                payments_by_debt, total_paid, total_balance
+                            )
+                            send_whatsapp_file(
+                                sender_phone,
+                                f"daynjir_statement_{re.sub(r'[^A-Za-z0-9_-]+', '_', str(matched_customer_name))}.pdf",
+                                pdf_bytes,
+                                "application/pdf",
+                                f"📄 PDF — Xisaabta {matched_customer_name}"
+                            )
+                        except Exception as pdf_error:
+                            print(f"⚠️ PDF statement generation failed: {type(pdf_error).__name__}: {pdf_error}")
+                            send_whatsapp(sender_phone, "❌ PDF lama samayn karin hadda. Fadlan mar kale isku day.")
 
             except Exception as e:
                 print(f"❌ Statement/history error: {type(e).__name__}: {e}")
@@ -1853,7 +1895,7 @@ async def whatsapp_webhook(request: Request):
             send_whatsapp(sender_phone, success_message)
 
     if failed_inserts:
-        error_message = f"❌ {len(failed_inserts)} deyntan ma keydsamin:\n"
+        error_message = f"❌ {len(failed_inserts)} deyntii ma keydsamin:\n"
         for fail in failed_inserts:
             error_message += f"- {fail['name']}: {fail['reason']}\n"
         send_whatsapp(sender_phone, error_message)
