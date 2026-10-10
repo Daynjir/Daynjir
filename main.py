@@ -129,19 +129,20 @@ def format_reminder_list(debtors, missing_phone_count=0):
     return "\n".join(lines)
 
 
-def build_debt_reminder(debtor):
+
+def build_debt_reminder(debtor, shopkeeper_name, shopkeeper_phone):
     name = str(debtor.get("name") or "Macmiil").strip()
     balance = float(debtor.get("amount") or 0)
-   
-return (
-    f"Asc {name},\n\n"
-    f"Fariintan waxaa kuu soo diray {shopkeeper_name} "
-    f"({shopkeeper_phone}).\n\n"
-    f"Waxaan si xushmad leh kuu xusuusinaynaa in aad "
-    f"soo bixiso lacagtii daynta ahayd oo dhan: *${balance:.2f}*.\n\n"
-    "Fadlan si dhakhso ah usoo dir. "
-    "Mahadsanid."
-)
+
+    return (
+        f"Asc {name},\n\n"
+        f"Fariintan waxaa kuu soo diray {shopkeeper_name} "
+        f"({shopkeeper_phone}).\n\n"
+        f"Waxaan si xushmad leh kuu xusuusinaynaa in aad "
+        f"soo bixiso lacagtii daynta ahayd oo dhan: *${balance:.2f}*.\n\n"
+        "Fadlan si dhakhso ah usoo dir. "
+        "Mahadsanid."
+    )
 
 # Securely load credentials from Render's Environment panel variables
 supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
