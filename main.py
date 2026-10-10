@@ -142,9 +142,12 @@ def build_debt_reminder(debtor, shopkeeper_name, shopkeeper_phone):
 
     return (
         f"Asc {name},\n"
+        
         f"Waxaan si xushmad leh kuu xusuusinaynaa in aad soo bixiso "
         f"lacagtii daynta ahayd oo dhan: *${balance:.2f}*.\n"
+        
         f"Fariintan waxaa kuu soo diray *{sender}*.\n"
+        
         f"Fadlan sida ugu dhakhsaha badan u bixi lacagta. Mahadsanid."
     )
 
@@ -1115,8 +1118,7 @@ async def whatsapp_webhook(request: Request):
                 f"💰 Wadarta deynta: ${total:.2f}",
                 "",
                 "Haddii aad hubisay, soo qor *HAA DIR* si fariimaha loo diro.",
-                "Haddii kale soo qor *JOOJI*.",
-                "⏳ Xulashadani waxay dhacaysaa 15 daqiiqo gudahood.",
+                "Haddii kale soo qor *JOOJI*."
             ])
             send_whatsapp(sender_phone, "\n".join(preview_lines))
             return {"status": "reminder_selection_confirm_required", "selected": len(selected_debtors)}
@@ -1209,7 +1211,7 @@ async def whatsapp_webhook(request: Request):
         if not previous_statement or previous_statement.get("shopkeeper_id") != shopkeeper_id:
             send_whatsapp(
                 sender_phone,
-                "ℹ️ Marka hore codso xisaabta macmiilka, tusaale: *Bagadh Mamulka taariikh*. "
+                "ℹ️ Marka hore codso xisaabta macmiilka, tusaale: *Cali taariikh*. "
                 "Kadib soo qor *PDF* si aan PDF ugu diro."
             )
             return {"status": "no_recent_statement_for_pdf"}
@@ -1278,9 +1280,9 @@ async def whatsapp_webhook(request: Request):
             if not entries:
                 if is_rate_limited:
                     reply = (
-                        "⏳ AI-gu wuxuu gaaray xadka isticmaalka, fariintana si ammaan ah looma fahmin.\n\n"
-                        "Fadlan isticmaal qaab cad sida: MAGACA $10, edit MAGACA $10, "
-                        "delete MAGACA, ama search MAGACA. Fariinta lama diiwaangelin."
+                        "⏳ AI-gu wuxuu gaaray xadka isticmaalka.\n\n"
+                        "Fadlan isticmaal qaab kale sida: Deyn cusub: MAGACA $lacagta, waxka bedelka: edit MAGACA $lacagta, "
+                        "delete MAGACA, ama search MAGACA."
                     )
                     send_whatsapp(sender_phone, reply)
                     return {"status": "groq_rate_limited_unparsed"}
@@ -1404,8 +1406,8 @@ async def whatsapp_webhook(request: Request):
                     sender_phone,
                     "⚠️ Lacagta deynta lama sheegin.\n\n"
                     "Haddii aad rabto inaad beddesho ballanta deyn hore, qor magaca iyo taariikhda.\n"
-                    "Tusaale: C/SAMAD SANDHEERE oct 10\n"
-                    "Deyn cusubna ku qor: C/SAMAD SANDHEERE $4 oct 10"
+                    "Tusaale: Faarax oct 10\n"
+                    "Deyn cusubna ku qor: Axmed $5 oct 11"
                 )
                 failed_inserts.append({"name": name or "Unknown", "reason": "Amount missing for new debt"})
                 continue
@@ -2017,7 +2019,7 @@ async def whatsapp_webhook(request: Request):
                         lines.append(f"  • Haraaga hadda: ${max(balance, 0.0):.2f}")
                         due_date = debt.get("promised_date")
                         lines.append(f"  • Ballan: {due_date if due_date else 'Lama cayimin'}")
-                        lines.append(f"  • Xaalad: {'✅ LA BIXIYAY' if debt_paid else '⏳ WELI LAGAMA BIXIN'}")
+                        lines.append(f"  • Xaalad: {'✅ LA BIXIYAY' if debt_paid else '⏳ WELI LAMA BIXIN'}")
 
                         debt_payments = payments_by_debt.get(str(debt.get("id")), [])
                         if debt_payments:
@@ -2037,7 +2039,7 @@ async def whatsapp_webhook(request: Request):
                     lines.extend([
                         "━━━━━━━━━━━━━━",
                         f"💵 *Wadarta lacagta la bixiyay ee diiwaangashan:* ${total_paid:.2f}",
-                        f"📌 *Wadarta haraaga deynta:* ${total_balance:.2f}",
+                        f"📌 *Wadarta hadhaaga deynta:* ${total_balance:.2f}",
                         "_Warbixintani waxay ku salaysan tahay diiwaannada hadda ku jira nidaamka._"
                     ])
                     message = "\n".join(lines)
