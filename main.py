@@ -1313,8 +1313,8 @@ async def whatsapp_webhook(request: Request):
                     return {"status": "groq_rate_limited_unparsed"}
                 send_whatsapp(
                     sender_phone,
-                    "⚠️ AI-gu hadda ma shaqaynayo, fariintana si ammaan ah looma fahmin. "
-                    "Fadlan isticmaal qaab cad sida MAGACA $10 ama search MAGACA. Fariinta lama diiwaangelin."
+                    "⚠️ AI-gu hadda ma shaqaynayo. "
+                    "Fadlan isticmaal qaab kale sida MAGACA $lacagta ama search MAGACA."
                 )
                 return {"status": "groq_error_unparsed"}
 
@@ -1978,25 +1978,36 @@ async def whatsapp_webhook(request: Request):
                     send_whatsapp(sender_phone, f"❌ Lama helin qofka {name}. Hubi higgaadda magaca ama isku day magaciisa oo buuxa.")
                     continue
 
-                distinct_search_names = {normalize_customer_name(d.get("name")) for d in search_matches}
+                distinct_search_names = {
+                    normalize_customer_name(d.get("name"))
+                    for d in search_matches
+                }
+
                 if len(distinct_search_names) > 1:
                     ask_for_full_name(sender_phone, search_matches, "SEARCH")
                     continue
 
                 matched_name = search_matches[0].get("name", name)
-                total_debt = sum(float(d.get("amount") or 0) for d in search_matches if not d.get("is_paid"))
-                unpaid_count = sum(1 for d in search_matches if not d.get("is_paid"))
-                paid_count = sum(1 for d in search_matches if d.get("is_paid"))
-                lines = []
-                for i, debt in enumerate(sorted(search_matches, key=lambda d: str(d.get("created_at") or ""), reverse=True), 1):
-                    status = "✅ LA BIXIYAY" if debt.get("is_paid") else "⏳ WELI LAGUMA BIXIN"
-                    lines.append(f"{i}. ${float(debt.get('amount') or 0):.2f} — Ballan: {debt.get('promised_date') or 'lama gelin'} — {status}")
-                message = (
-                    f"🔎 *Natiijada raadinta: {matched_name}*\n\n"
-                    f"💰 Wadarta deynta harsan: *${total_debt:.2f}*\n"
-                    f"⏳ Deymo aan la bixin: {unpaid_count} | ✅ La bixiyay: {paid_count}\n\n"
-                    + "\n".join(lines)
+
+                total_debt = sum(
+                    float(d.get("amount") or 0)
+                    for d in search_matches
+                    if not d.get("is_paid")
                 )
+
+                paid_count = sum(
+                    1 for d in search_matches
+                    if d.get("is_paid")
+                )
+
+                message = (
+                    f"🔎 *Natiijada raadinta: {matched_name}*\n"
+                    f"💰 Wadarta deynta harsan: *${total_debt:.2f}*\n"
+                    f"Deyn bixin hore: {paid_count}"
+                )
+
+                send_whatsapp(sender_phone, message)
+                
                 send_whatsapp(sender_phone, message)
             except Exception as e:
                 print(f"❌ Search error: {type(e).__name__}: {e}")
@@ -2065,7 +2076,7 @@ async def whatsapp_webhook(request: Request):
                         "━━━━━━━━━━━━━━",
                         f"💵 *Wadarta lacagta la bixiyay ee diiwaangashan:* ${total_paid:.2f}",
                         f"📌 *Wadarta hadhaaga deynta:* ${total_balance:.2f}",
-                        "_Warbixintani waxay ku salaysan tahay diiwaannada hadda ku jira nidaamka._"
+                     
                     ])
                     message = "\n".join(lines)
                     # WhatsApp has a message-size limit; trim long statements safely.
@@ -2149,13 +2160,13 @@ async def whatsapp_webhook(request: Request):
                     f"🆕 Tirada Deymaha cusub ee la diwaangeliyay: {len(new_debts)}\n"
                     f"💵 Lacagta soo xarootay (payments table): ${period_collected:.2f}\n"
                     f"📌 Hadhaaga guud ee deynta hadda: ${total_outstanding:.2f}\n"
-                    f"⚠️ Deyn ballan dhaaftay: {len(overdue)} macaamiil / ${sum(float(d.get('amount') or 0) for d in overdue):.2f}\n"
-                    f"📅 Ballan maanta: {len(due_today)} macaamiil\n\n"
+                    f"⚠️ Deymaha ballan dhaafka ah: {len(overdue)} macaamiil / ${sum(float(d.get('amount') or 0) for d in overdue):.2f}\n"
+                    f"📅 Ballamaha maanta: {len(due_today)} macaamiil\n\n"
                 )
                 send_whatsapp(sender_phone, message)
             except Exception as e:
                 print(f"❌ Report error: {type(e).__name__}: {e}")
-                send_whatsapp(sender_phone, "❌ Warbixinta lama diyaarin. Hubi payments table iyo permissions-ka Supabase.")
+                send_whatsapp(sender_phone, "❌ Warbixinta lama diyaarin.")
                 failed_inserts.append({"name": "REPORT", "reason": str(e)})
         
         elif action == "EXPORT":
@@ -2167,7 +2178,7 @@ async def whatsapp_webhook(request: Request):
                 )
                 debts_to_export = all_debts_result.data or []
                 if not debts_to_export:
-                    send_whatsapp(sender_phone, "✅ Ma jiraan deymo la dhoofin karo.")
+                    send_whatsapp(sender_phone, "✅ Ma jiraan deymo la soo saari karo.")
                     continue
 
                 csv_buffer = StringIO()
@@ -2184,7 +2195,7 @@ async def whatsapp_webhook(request: Request):
                     "text/csv", f"📥 Deymaha la dhoofiyay: {len(debts_to_export)} diiwaan"
                 )
                 if not sent:
-                    send_whatsapp(sender_phone, "❌ Faylka CSV lama dirin. Hubi Green-API sendFileByUpload iyo server logs-ka.")
+                    send_whatsapp(sender_phone, "❌ Faylka CSV lama dirin.")
             except Exception as e:
                 print(f"❌ Export error: {type(e).__name__}: {e}")
                 send_whatsapp(sender_phone, "❌ Dhoofinta CSV way fashilantay. Hubi server logs-ka.")
