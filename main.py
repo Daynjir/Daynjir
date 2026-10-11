@@ -2015,19 +2015,38 @@ async def whatsapp_webhook(request: Request):
                 send_whatsapp(sender_phone, "❌ Khalad ayaa dhacay. Fadlan isku day inaad saxdo magaca.")
                 failed_inserts.append({"name": name, "reason": f"Search error: {type(e).__name__}: {e}"})
 
+       
         elif action == "HISTORY":
             try:
                 # Full customer statement: debt records, payment events, and current outstanding balance.
                 history_matches = find_debtor_matches(shopkeeper_id, name)
 
                 if not history_matches:
-                    send_whatsapp(sender_phone, f"❌ Taariikh looma helin macmiilka {name}.")
+                    send_whatsapp(
+                        sender_phone,
+                        f"❌ Taariikh looma helin macmiilka {name}."
+                    )
+
                 elif len({normalize_customer_name(d.get("name")) for d in history_matches}) > 1:
-                    ask_for_full_name(sender_phone, history_matches, "HISTORY")
+                    ask_for_full_name(
+                        sender_phone,
+                        history_matches,
+                        "HISTORY"
+                    )
+
                 else:
-                    history_matches.sort(key=lambda d: str(d.get("created_at") or ""))
-                    debtor_ids = [d.get("id") for d in history_matches if d.get("id") is not None]
+                    history_matches.sort(
+                        key=lambda d: str(d.get("created_at") or "")
+                    )
+
+                    debtor_ids = [
+                        d.get("id")
+                        for d in history_matches
+                        if d.get("id") is not None
+                    ]
+
                     payment_rows = []
+
                     if debtor_ids:
                         payment_result = (
                             supabase.table("payments")
@@ -2040,51 +2059,104 @@ async def whatsapp_webhook(request: Request):
                         payment_rows = payment_result.data or []
 
                     payments_by_debt = {}
-                    for payment in payment_rows:
-                        payments_by_debt.setdefault(str(payment.get("debtor_id")), []).append(payment)
 
-                    lines = [f"📒 *STATEMENT / XISAABTA MACMIILKA: {history_matches[0].get('name', name)}*", ""]
+                    for payment in payment_rows:
+                        payments_by_debt.setdefault(
+                            str(payment.get("debtor_id")),
+                            []
+                        ).append(payment)
+
+                    lines = [
+                        f"📒 *STATEMENT / XISAABTA MACMIILKA: {history_matches[0].get('name', name)}*",
+                        ""
+                    ]
+
                     total_balance = 0.0
                     total_paid = 0.0
+
                     for index, debt in enumerate(history_matches, 1):
                         balance = float(debt.get("amount") or 0)
-                        debt_paid = bool(debt.get("is_paid")) or balance <= 0
-                        total_balance += max(balance, 0.0)
-                        lines.append(
-                            f"*Deyn #{index}* — {str(debt.get('created_at') or '')[:10] or 'Taariikh lama hayo'}"
+                        debt_paid = (
+                            bool(debt.get("is_paid"))
+                            or balance <= 0
                         )
-                        lines.append(f"  • Haraaga hadda: ${max(balance, 0.0):.2f}")
-                        due_date = debt.get("promised_date")
-                        lines.append(f"  • Ballan: {due_date if due_date else 'Lama cayimin'}")
-                        lines.append(f"  • Xaalad: {'✅ LA BIXIYAY' if debt_paid else '⏳ WELI LAMA BIXIN'}")
 
-                        debt_payments = payments_by_debt.get(str(debt.get("id")), [])
+                        total_balance += max(balance, 0.0)
+
+                        lines.append(
+                            f"*Deyn #{index}* — "
+                            f"{str(debt.get('created_at') or '')[:10] or 'Taariikh lama hayo'}"
+                        )
+
+                        lines.append(
+                            f"  • Haraaga hadda: ${max(balance, 0.0):.2f}"
+                        )
+
+                        due_date = debt.get("promised_date")
+
+                        lines.append(
+                            f"  • Ballan: {due_date if due_date else 'Lama cayimin'}"
+                        )
+
+                        lines.append(
+                            f"  • Xaalad: "
+                            f"{'✅ LA BIXIYAY' if debt_paid else '⏳ WELI LAMA BIXIN'}"
+                        )
+
+                        debt_payments = payments_by_debt.get(
+                            str(debt.get("id")),
+                            []
+                        )
+
                         if debt_payments:
                             lines.append("  • Lacag-bixinnada:")
+
                             for payment in debt_payments:
-                                paid_amount = float(payment.get("amount") or 0)
+                                paid_amount = float(
+                                    payment.get("amount") or 0
+                                )
+
                                 total_paid += paid_amount
-                                paid_date = str(payment.get("paid_at") or "")[:10] or "Taariikh lama hayo"
-                                lines.append(f"    - {paid_date}: ${paid_amount:.2f}")
+
+                                paid_date = (
+                                    str(payment.get("paid_at") or "")[:10]
+                                    or "Taariikh lama hayo"
+                                )
+
+                                lines.append(
+                                    f"    - {paid_date}: ${paid_amount:.2f}"
+                                )
+
                         else:
-                            lines.append("  • Lacag-bixin hore: Ma jirto")
+                            lines.append(
+                                "  • Lacag-bixin hore: Ma jirto"
+                            )
+
                         lines.append("")
 
-                    # If the same customer has several debt rows, list all associated payments.
                     if not payment_rows:
                         total_paid = 0.0
+
                     lines.extend([
                         "━━━━━━━━━━━━━━",
                         f"💵 *Wadarta lacagta la bixiyay ee diiwaangashan:* ${total_paid:.2f}",
                         f"📌 *Wadarta hadhaaga deynta:* ${total_balance:.2f}",
-                     
                     ])
+
                     message = "\n".join(lines)
-                    # WhatsApp has a message-size limit; trim long statements safely.
+
                     if len(message) > 6000:
-                        message = message[:5850] + "\n\n… Liiska waa la soo gaabiyay; macmiilku wuxuu leeyahay diiwaanno badan."
-                    matched_customer_name = history_matches[0].get("name", name)
-                    # Save the statement context for a follow-up "PDF" command.
+                        message = (
+                            message[:5850]
+                            + "\n\n… Liiska waa la soo gaabiyay; "
+                            "macmiilku wuxuu leeyahay diiwaanno badan."
+                        )
+
+                    matched_customer_name = history_matches[0].get(
+                        "name",
+                        name
+                    )
+
                     LAST_HISTORY_REQUESTS[sender_phone] = {
                         "shopkeeper_id": shopkeeper_id,
                         "customer_name": matched_customer_name,
@@ -2093,43 +2165,71 @@ async def whatsapp_webhook(request: Request):
                     if not pdf_only_requested:
                         send_whatsapp(
                             sender_phone,
-                            message + "\n\n📎 Haddii aad PDF ku rabto xisaabta macmiilkan, soo qor *PDF*."
+                            message
+                            + "\n\n📎 Haddii aad PDF ku rabto "
+                              "xisaabta macmiilkan, soo qor *PDF*."
                         )
+
                     else:
                         try:
                             pdf_bytes = build_statement_pdf(
-                                matched_customer_name, history_matches,
-                                payments_by_debt, total_paid, total_balance
+                                matched_customer_name,
+                                history_matches,
+                                payments_by_debt,
+                                total_paid,
+                                total_balance
                             )
+
                             send_whatsapp_file(
                                 sender_phone,
-                                f"daynjir_statement_{re.sub(r'[^A-Za-z0-9_-]+', '_', str(matched_customer_name))}.pdf",
+                                (
+                                    "daynjir_statement_"
+                                    f"{re.sub(r'[^A-Za-z0-9_-]+', '_', str(matched_customer_name))}"
+                                    ".pdf"
+                                ),
                                 pdf_bytes,
                                 "application/pdf",
                                 f"📄 PDF — Xisaabta {matched_customer_name}"
                             )
-                        except Exception as pdf_error:
-                            print(f"⚠️ PDF statement generation failed: {type(pdf_error).__name__}: {pdf_error}")
-                            send_whatsapp(sender_phone, "❌ PDF lama samayn karin hadda. Fadlan mar kale isku day.")
 
-                        except Exception as e:
-                print(f"❌ Report error: {type(e).__name__}: {e}")
+                        except Exception as pdf_error:
+                            print(
+                                "⚠️ PDF statement generation failed: "
+                                f"{type(pdf_error).__name__}: {pdf_error}"
+                            )
+
+                            send_whatsapp(
+                                sender_phone,
+                                "❌ PDF lama samayn karin hadda. "
+                                "Fadlan mar kale isku day."
+                            )
+
+            except Exception as e:
+                print(
+                    f"❌ History error: {type(e).__name__}: {e}"
+                )
+
                 send_whatsapp(
                     sender_phone,
-                    "❌ Warbixinta lama diyaarin."
+                    "❌ Khalad ayaa dhacay markii "
+                    "statement-ka la diyaarinayay."
                 )
+
                 failed_inserts.append({
-                    "name": "REPORT",
-                    "reason": str(e)
+                    "name": name,
+                    "reason": f"History error: {type(e).__name__}: {e}"
                 })
 
-        elif action == "EXPORT":
+
+        elif action == "REPORT":
             try:
                 all_debts_result = (
-                    supabase.table("debtors").select("*")
+                    supabase.table("debtors")
+                    .select("*")
                     .eq("shopkeeper_id", shopkeeper_id)
                     .execute()
                 )
+
                 all_debts = all_debts_result.data or []
 
                 if not all_debts:
@@ -2142,11 +2242,15 @@ async def whatsapp_webhook(request: Request):
                 today = today_eat()
 
                 if filter_type == "week":
-                    period_start = today - timedelta(days=today.weekday())
+                    period_start = (
+                        today - timedelta(days=today.weekday())
+                    )
                     title = "📊 Warbixinta toddobaadka"
+
                 elif filter_type == "month":
                     period_start = today.replace(day=1)
                     title = "📊 Warbixinta bisha"
+
                 else:
                     period_start = today
                     title = "📊 Warbixinta maanta"
@@ -2182,7 +2286,8 @@ async def whatsapp_webhook(request: Request):
                 period_payments = payments_result.data or []
 
                 new_debts = [
-                    d for d in all_debts
+                    d
+                    for d in all_debts
                     if d.get("created_at")
                     and start_iso <= str(d.get("created_at")) < end_iso
                 ]
@@ -2204,10 +2309,12 @@ async def whatsapp_webhook(request: Request):
                 )
 
                 overdue = [
-                    d for d in all_debts
+                    d
+                    for d in all_debts
                     if d.get("is_paid") is not True
                     and d.get("promised_date")
-                    and str(d.get("promised_date")) < today.isoformat()
+                    and str(d.get("promised_date"))
+                    < today.isoformat()
                 ]
 
                 overdue_amount = sum(
@@ -2216,64 +2323,137 @@ async def whatsapp_webhook(request: Request):
                 )
 
                 due_today = [
-                    d for d in all_debts
+                    d
+                    for d in all_debts
                     if d.get("is_paid") is not True
                     and d.get("promised_date") == today.isoformat()
                 ]
 
                 message = (
                     f"{title}\n\n"
-                    f"🆕 Tirada Deymaha cusub ee la diwaangeliyay: {len(new_debts)} = ${new_debt_amount:.2f}\n"
-                    f"💵 Lacagta soo xarootay (payments table): ${period_collected:.2f}\n"
-                    f"📌 Hadhaaga guud ee deynta hadda: ${total_outstanding:.2f}\n"
-                    f"⚠️ Deymaha ballan dhaafka ah: {len(overdue)} macaamiil = ${overdue_amount:.2f}\n"
-                    f"📅 Ballamaha maanta: {len(due_today)} macaamiil\n\n"
+                    f"🆕 Tirada Deymaha cusub ee la diwaangeliyay: "
+                    f"{len(new_debts)} = ${new_debt_amount:.2f}\n"
+                    f"💵 Lacagta soo xarootay (payments table): "
+                    f"${period_collected:.2f}\n"
+                    f"📌 Hadhaaga guud ee deynta hadda: "
+                    f"${total_outstanding:.2f}\n"
+                    f"⚠️ Deymaha ballan dhaafka ah: "
+                    f"{len(overdue)} macaamiil = ${overdue_amount:.2f}\n"
+                    f"📅 Ballamaha maanta: "
+                    f"{len(due_today)} macaamiil\n\n"
                 )
 
-                send_whatsapp(sender_phone, message)
+                send_whatsapp(
+                    sender_phone,
+                    message
+                )
 
             except Exception as e:
-                print(f"❌ Report error: {type(e).__name__}: {e}")
+                print(
+                    f"❌ Report error: {type(e).__name__}: {e}"
+                )
+
                 send_whatsapp(
                     sender_phone,
                     "❌ Warbixinta lama diyaarin."
                 )
+
                 failed_inserts.append({
                     "name": "REPORT",
                     "reason": str(e)
                 })
 
+
         elif action == "EXPORT":
             try:
                 all_debts_result = (
-                    supabase.table("debtors").select("*")
+                    supabase.table("debtors")
+                    .select("*")
                     .eq("shopkeeper_id", shopkeeper_id)
-                    .order("promised_date", desc=False).execute()
+                    .order("promised_date", desc=False)
+                    .execute()
                 )
+
                 debts_to_export = all_debts_result.data or []
+
                 if not debts_to_export:
-                    send_whatsapp(sender_phone, "✅ Ma jiraan deymo la soo saari karo.")
+                    send_whatsapp(
+                        sender_phone,
+                        "✅ Ma jiraan deymo la soo saari karo."
+                    )
                     continue
 
                 csv_buffer = StringIO()
+
                 writer = csv.writer(csv_buffer)
-                writer.writerow(["Name", "Current Balance", "Due Date", "Phone", "Status", "Created At"])
+
+                writer.writerow([
+                    "Name",
+                    "Current Balance",
+                    "Due Date",
+                    "Phone",
+                    "Status",
+                    "Created At"
+                ])
+
                 for debt in debts_to_export:
-                    balance = max(float(debt.get("amount") or 0), 0.0)
-                    status = "PAID" if debt.get("is_paid") is True or balance <= 0 else "UNPAID"
-                    writer.writerow([debt.get("name", ""), f"{balance:.2f}", debt.get("promised_date") or "",
-                                     debt.get("phone_number") or "", status, debt.get("created_at") or ""])
-                csv_content = csv_buffer.getvalue().encode("utf-8-sig")
-                sent = send_whatsapp_file(
-                    sender_phone, f"daynjir_debts_{today_eat().isoformat()}.csv", csv_content,
-                    "text/csv", f"📥 Deymaha la dhoofiyay: {len(debts_to_export)} diiwaan"
+                    balance = max(
+                        float(debt.get("amount") or 0),
+                        0.0
+                    )
+
+                    status = (
+                        "PAID"
+                        if debt.get("is_paid") is True
+                        or balance <= 0
+                        else "UNPAID"
+                    )
+
+                    writer.writerow([
+                        debt.get("name", ""),
+                        f"{balance:.2f}",
+                        debt.get("promised_date") or "",
+                        debt.get("phone_number") or "",
+                        status,
+                        debt.get("created_at") or ""
+                    ])
+
+                csv_content = (
+                    csv_buffer
+                    .getvalue()
+                    .encode("utf-8-sig")
                 )
+
+                sent = send_whatsapp_file(
+                    sender_phone,
+                    f"daynjir_debts_{today_eat().isoformat()}.csv",
+                    csv_content,
+                    "text/csv",
+                    f"📥 Deymaha la dhoofiyay: "
+                    f"{len(debts_to_export)} diiwaan"
+                )
+
                 if not sent:
-                    send_whatsapp(sender_phone, "❌ Faylka CSV lama dirin.")
+                    send_whatsapp(
+                        sender_phone,
+                        "❌ Faylka CSV lama dirin."
+                    )
+
             except Exception as e:
-                print(f"❌ Export error: {type(e).__name__}: {e}")
-                send_whatsapp(sender_phone, "❌ Dhoofinta CSV way fashilantay. Hubi server logs-ka.")
-                failed_inserts.append({"name": "EXPORT", "reason": str(e)})
+                print(
+                    f"❌ Export error: {type(e).__name__}: {e}"
+                )
+
+                send_whatsapp(
+                    sender_phone,
+                    "❌ Dhoofinta CSV way fashilantay. "
+                    "Hubi server logs-ka."
+                )
+
+                failed_inserts.append({
+                    "name": "EXPORT",
+                    "reason": str(e)
+                })
 
     # Send confirmation for ADD actions
     if successful_inserts:
