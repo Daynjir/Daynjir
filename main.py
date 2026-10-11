@@ -2112,23 +2112,34 @@ async def whatsapp_webhook(request: Request):
                             print(f"⚠️ PDF statement generation failed: {type(pdf_error).__name__}: {pdf_error}")
                             send_whatsapp(sender_phone, "❌ PDF lama samayn karin hadda. Fadlan mar kale isku day.")
 
-            except Exception as e:
-                print(f"❌ Statement/history error: {type(e).__name__}: {e}")
-                send_whatsapp(sender_phone, "❌ Khalad ayaa dhacay markii la diyaarinayay statement-ka. Hubi payments table iyo permissions-ka Supabase.")
-                failed_inserts.append({"name": name, "reason": f"History error: {type(e).__name__}: {e}"})
-        
-        elif action == "REPORT":
+                        except Exception as e:
+                print(f"❌ Report error: {type(e).__name__}: {e}")
+                send_whatsapp(
+                    sender_phone,
+                    "❌ Warbixinta lama diyaarin."
+                )
+                failed_inserts.append({
+                    "name": "REPORT",
+                    "reason": str(e)
+                })
+
+        elif action == "EXPORT":
             try:
                 all_debts_result = (
                     supabase.table("debtors").select("*")
                     .eq("shopkeeper_id", shopkeeper_id).execute()
                 )
                 all_debts = all_debts_result.data or []
+
                 if not all_debts:
-                    send_whatsapp(sender_phone, "✅ Ma jiraan deymo ku jira nidaamka.")
+                    send_whatsapp(
+                        sender_phone,
+                        "✅ Ma jiraan deymo ku jira nidaamka."
+                    )
                     continue
 
                 today = today_eat()
+
                 if filter_type == "week":
                     period_start = today - timedelta(days=today.weekday())
                     title = "📊 Warbixinta toddobaadka"
@@ -2139,36 +2150,97 @@ async def whatsapp_webhook(request: Request):
                     period_start = today
                     title = "📊 Warbixinta maanta"
 
-                start_utc = datetime.combine(period_start, datetime.min.time(), tzinfo=EAT).astimezone(timezone.utc)
-                end_utc = datetime.combine(today + timedelta(days=1), datetime.min.time(), tzinfo=EAT).astimezone(timezone.utc)
+                start_utc = (
+                    datetime.combine(
+                        period_start,
+                        datetime.min.time(),
+                        tzinfo=EAT
+                    ).astimezone(timezone.utc)
+                )
+
+                end_utc = (
+                    datetime.combine(
+                        today + timedelta(days=1),
+                        datetime.min.time(),
+                        tzinfo=EAT
+                    ).astimezone(timezone.utc)
+                )
+
                 start_iso = start_utc.isoformat()
                 end_iso = end_utc.isoformat()
 
                 payments_result = (
-                    supabase.table("payments").select("amount, paid_at, debtor_id")
+                    supabase.table("payments")
+                    .select("amount, paid_at, debtor_id")
                     .eq("shopkeeper_id", shopkeeper_id)
-                    .gte("paid_at", start_iso).lt("paid_at", end_iso).execute()
+                    .gte("paid_at", start_iso)
+                    .lt("paid_at", end_iso)
+                    .execute()
                 )
+
                 period_payments = payments_result.data or []
-                new_debts = [d for d in all_debts if d.get("created_at") and start_iso <= str(d.get("created_at")) < end_iso]
-                total_outstanding = sum(max(float(d.get("amount") or 0), 0.0) for d in all_debts if d.get("is_paid") is not True)
-                period_collected = sum(float(p.get("amount") or 0) for p in period_payments)
-                overdue = [d for d in all_debts if d.get("is_paid") is not True and d.get("promised_date") and str(d.get("promised_date")) < today.isoformat()]
-                due_today = [d for d in all_debts if d.get("is_paid") is not True and d.get("promised_date") == today.isoformat()]
+
+                new_debts = [
+                    d for d in all_debts
+                    if d.get("created_at")
+                    and start_iso <= str(d.get("created_at")) < end_iso
+                ]
+
+                # Total amount of newly created debts
+                new_debt_amount = sum(
+                    float(d.get("amount") or 0)
+                    for d in new_debts
+                )
+
+                total_outstanding = sum(
+                    max(float(d.get("amount") or 0), 0.0)
+                    for d in all_debts
+                    if d.get("is_paid") is not True
+                )
+
+                period_collected = sum(
+                    float(p.get("amount") or 0)
+                    for p in period_payments
+                )
+
+                overdue = [
+                    d for d in all_debts
+                    if d.get("is_paid") is not True
+                    and d.get("promised_date")
+                    and str(d.get("promised_date")) < today.isoformat()
+                ]
+
+                overdue_amount = sum(
+                    float(d.get("amount") or 0)
+                    for d in overdue
+                )
+
+                due_today = [
+                    d for d in all_debts
+                    if d.get("is_paid") is not True
+                    and d.get("promised_date") == today.isoformat()
+                ]
 
                 message = (
                     f"{title}\n\n"
                     f"🆕 Tirada Deymaha cusub ee la diwaangeliyay: {len(new_debts)} = ${new_debt_amount:.2f}\n"
                     f"💵 Lacagta soo xarootay (payments table): ${period_collected:.2f}\n"
                     f"📌 Hadhaaga guud ee deynta hadda: ${total_outstanding:.2f}\n"
-                    f"⚠️ Deymaha ballan dhaafka ah: {len(overdue)} macaamiil = ${sum(float(d.get('amount') or 0) for d in overdue):.2f}\n"
+                    f"⚠️ Deymaha ballan dhaafka ah: {len(overdue)} macaamiil = ${overdue_amount:.2f}\n"
                     f"📅 Ballamaha maanta: {len(due_today)} macaamiil\n\n"
                 )
+
                 send_whatsapp(sender_phone, message)
+
             except Exception as e:
                 print(f"❌ Report error: {type(e).__name__}: {e}")
-                send_whatsapp(sender_phone, "❌ Warbixinta lama diyaarin.")
-                failed_inserts.append({"name": "REPORT", "reason": str(e)})
+                send_whatsapp(
+                    sender_phone,
+                    "❌ Warbixinta lama diyaarin."
+                )
+                failed_inserts.append({
+                    "name": "REPORT",
+                    "reason": str(e)
         
         elif action == "EXPORT":
             try:
