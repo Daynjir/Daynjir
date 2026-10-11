@@ -2158,10 +2158,10 @@ async def whatsapp_webhook(request: Request):
 
                 message = (
                     f"{title}\n\n"
-                    f"🆕 Tirada Deymaha cusub ee la diwaangeliyay: {len(new_debts)}\n"
+                    f"🆕 Tirada Deymaha cusub ee la diwaangeliyay: {len(new_debts)} = ${new_debt_amount:.2f}\n"
                     f"💵 Lacagta soo xarootay (payments table): ${period_collected:.2f}\n"
                     f"📌 Hadhaaga guud ee deynta hadda: ${total_outstanding:.2f}\n"
-                    f"⚠️ Deymaha ballan dhaafka ah: {len(overdue)} macaamiil / ${sum(float(d.get('amount') or 0) for d in overdue):.2f}\n"
+                    f"⚠️ Deymaha ballan dhaafka ah: {len(overdue)} macaamiil = ${sum(float(d.get('amount') or 0) for d in overdue):.2f}\n"
                     f"📅 Ballamaha maanta: {len(due_today)} macaamiil\n\n"
                 )
                 send_whatsapp(sender_phone, message)
