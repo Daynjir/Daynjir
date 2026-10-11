@@ -773,7 +773,7 @@ async def whatsapp_webhook(request: Request):
     data = await request.json()
     print(f"📥 Green-API webhook received: type={data.get('typeWebhook')}")
     
-    type_webhook = data.get("typeWebhook")
+type_webhook = data.get("typeWebhook")
 
 # Green-API reports messages typed/sent from the WhatsApp phone
 # as outgoingMessageReceived.
