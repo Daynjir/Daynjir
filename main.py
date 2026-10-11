@@ -772,17 +772,36 @@ def send_due_list_followup(phone):
 async def whatsapp_webhook(request: Request):
     data = await request.json()
     print(f"📥 Green-API webhook received: type={data.get('typeWebhook')}")
-    
-type_webhook = data.get("typeWebhook")
 
-# Green-API reports messages typed/sent from the WhatsApp phone
-# as outgoingMessageReceived.
-# Messages sent by our bot through the API are outgoingAPIMessageReceived,
-# so ignore those to prevent the bot from processing its own replies.
-allowed_types = {"incomingMessageReceived", "outgoingMessageReceived"}
+    type_webhook = data.get("typeWebhook")
 
-if type_webhook not in allowed_types:
-    return {"status": "ignored"}
+    # Green-API reports messages typed/sent from the WhatsApp phone
+    # as outgoingMessageReceived.
+    #
+    # Messages sent by our bot through the API are
+    # outgoingAPIMessageReceived, so ignore those to prevent
+    # the bot from processing its own replies.
+    allowed_types = {
+        "incomingMessageReceived",
+        "outgoingMessageReceived",
+    }
+
+    if type_webhook not in allowed_types:
+        return {"status": "ignored"}
+
+    sender_data = data.get("senderData", {})
+    sender_chat_id = sender_data.get("chatId")
+
+    if not sender_chat_id:
+        return {"status": "no_chat_id"}
+
+    sender_phone = sender_chat_id.split("@")[0]
+    print(f"🔍 SENDER PHONE: {sender_phone}")
+
+    message_data = data.get("messageData", {})
+    type_message = message_data.get("typeMessage")
+
+    message_text = ""
         
     sender_data = data.get("senderData", {})
     sender_chat_id = sender_data.get("chatId")
