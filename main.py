@@ -1063,7 +1063,7 @@ async def whatsapp_webhook(request: Request):
             if is_reminder_confirm_command(reminder_text) or re.fullmatch(
                 r"\s*\d+(?:\s*[,; ]\s*\d+)*\s*", reminder_text
             ):
-                send_whatsapp(sender_phone, "⌛ Xulashadii xusuusintu way dhacday. Soo qor *XUSUUSIN* si aad mar kale u bilowdo.")
+                send_whatsapp(sender_phone, "⌛ codsigii xusuusintu wuu dhacay. Soo qor *XUSUUSIN* si aad mar kale u bilowdo.")
                 return {"status": "reminder_session_expired"}
 
     if is_reminder_start_command(reminder_text):
@@ -1094,8 +1094,7 @@ async def whatsapp_webhook(request: Request):
             if not eligible:
                 send_whatsapp(
                     sender_phone,
-                    "ℹ️ Ma jiro macmiil deyn lagu leeyahay oo leh lambar WhatsApp oo sax ah. "
-                    "Hubi in macaamiisha lagu kaydiyey phone number caalami ah, ama deji DEFAULT_COUNTRY_CODE gudaha Render."
+                    "ℹ️ Macmiilkan ma isticmaalo WhatsApp hubi in numberku saxan yahay."
                 )
                 return {"status": "no_reminder_eligible_debtors"}
 
@@ -2002,16 +2001,18 @@ async def whatsapp_webhook(request: Request):
 
                 message = (
                     f"🔎 *Natiijada raadinta: {matched_name}*\n"
-                    f"💰 Wadarta deynta harsan: *${total_debt:.2f}*\n"
+                    
+                    f"💰 Wadarta deynta hadhsan: *${total_debt:.2f}*\n"
+                    
                     f"Deyn bixin hore: {paid_count}"
                 )
 
-                send_whatsapp(sender_phone, message)
                 
                 send_whatsapp(sender_phone, message)
+                
             except Exception as e:
                 print(f"❌ Search error: {type(e).__name__}: {e}")
-                send_whatsapp(sender_phone, "❌ Khalad ayaa dhacay markii qofka la raadinayay. Fadlan mar kale isku day.")
+                send_whatsapp(sender_phone, "❌ Khalad ayaa dhacay. Fadlan isku day inaad saxdo magaca.")
                 failed_inserts.append({"name": name, "reason": f"Search error: {type(e).__name__}: {e}"})
 
         elif action == "HISTORY":
