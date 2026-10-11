@@ -2112,22 +2112,24 @@ async def whatsapp_webhook(request: Request):
                             print(f"⚠️ PDF statement generation failed: {type(pdf_error).__name__}: {pdf_error}")
                             send_whatsapp(sender_phone, "❌ PDF lama samayn karin hadda. Fadlan mar kale isku day.")
 
-                        except Exception as e:
-                print(f"❌ Report error: {type(e).__name__}: {e}")
-                send_whatsapp(
-                    sender_phone,
-                    "❌ Warbixinta lama diyaarin."
-                )
-                failed_inserts.append({
-                    "name": "REPORT",
-                    "reason": str(e)
-                })
+                    except Exception as e:
+                        print(f"❌ Statement/history error: {type(e).__name__}: {e}")
+                        send_whatsapp(
+                            sender_phone,
+                            "❌ Khalad ayaa dhacay markii la diyaarinayay statement-ka. "
+                            "Hubi payments table iyo permissions-ka Supabase."
+                        )
+                        failed_inserts.append({
+                            "name": name,
+                            "reason": f"History error: {type(e).__name__}: {e}"
+                        })
 
-        elif action == "EXPORT":
+        elif action == "REPORT":
             try:
                 all_debts_result = (
                     supabase.table("debtors").select("*")
-                    .eq("shopkeeper_id", shopkeeper_id).execute()
+                    .eq("shopkeeper_id", shopkeeper_id)
+                    .execute()
                 )
                 all_debts = all_debts_result.data or []
 
@@ -2186,7 +2188,6 @@ async def whatsapp_webhook(request: Request):
                     and start_iso <= str(d.get("created_at")) < end_iso
                 ]
 
-                # Total amount of newly created debts
                 new_debt_amount = sum(
                     float(d.get("amount") or 0)
                     for d in new_debts
@@ -2241,7 +2242,8 @@ async def whatsapp_webhook(request: Request):
                 failed_inserts.append({
                     "name": "REPORT",
                     "reason": str(e)
-        
+                })
+
         elif action == "EXPORT":
             try:
                 all_debts_result = (
