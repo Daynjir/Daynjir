@@ -773,10 +773,16 @@ async def whatsapp_webhook(request: Request):
     data = await request.json()
     print(f"📥 Green-API webhook received: type={data.get('typeWebhook')}")
     
-    allowed_types = {"incomingMessageReceived"}
-    if data.get("typeWebhook") not in allowed_types:
-        # Ignore outgoing API messages; otherwise the bot may process its own replies.
-        return {"status": "ignored"}
+    type_webhook = data.get("typeWebhook")
+
+# Green-API reports messages typed/sent from the WhatsApp phone
+# as outgoingMessageReceived.
+# Messages sent by our bot through the API are outgoingAPIMessageReceived,
+# so ignore those to prevent the bot from processing its own replies.
+allowed_types = {"incomingMessageReceived", "outgoingMessageReceived"}
+
+if type_webhook not in allowed_types:
+    return {"status": "ignored"}
         
     sender_data = data.get("senderData", {})
     sender_chat_id = sender_data.get("chatId")
