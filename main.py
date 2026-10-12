@@ -69,7 +69,7 @@ def normalize_reminder_phone(raw_phone):
 
 def is_reminder_start_command(text):
     return bool(re.fullmatch(
-        r"\s*(?:xusuusin|xusuusi|xasuusin|remind|remind debtors|payment reminders)\s*[.!]?\s*",
+        r"\s*(?:xusuusin|xusuusi|xasuusin|remind|remind customers|payment reminders)\s*[.!]?\s*",
         str(text or ""),
         flags=re.IGNORECASE,
     ))
@@ -105,16 +105,16 @@ def parse_reminder_selection(text, count):
     return list(dict.fromkeys(numbers))
 
 
-def format_reminder_list(debtors, missing_phone_count=0):
+def format_reminder_list(customers, missing_phone_count=0):
     lines = [
         "📣 *XUSUUSINTA DEYNTA*",
         "Dooro lambarrada macaamiisha aad rabto in la xusuusiyo.",
         "",
     ]
-    for index, debtor in enumerate(debtors, start=1):
+    for index, customer in enumerate(customers, start=1):
         lines.append(
-            f"{index}. {debtor.get('name') or 'Magac la’aan'} — "
-            f"${float(debtor.get('amount') or 0):.2f}"
+            f"{index}. {customer.get('name') or 'Magac la’aan'} — "
+            f"${float(customer.get('amount') or 0):.2f}"
         )
     lines.extend([
         "",
@@ -127,17 +127,17 @@ def format_reminder_list(debtors, missing_phone_count=0):
             f"ℹ️ {missing_phone_count} Lanbarkan ma saxna ama laguma isticmaalo WhatsApp.",
         ])
     return "\n".join(lines)
-def build_debt_reminder(debtor, shopkeeper_name, shopkeeper_phone):
-    name = str(debtor.get("name") or "Macmiil").strip()
-    balance = float(debtor.get("amount") or 0)
+def build_payment_reminder(customer, business_user_name, business_user_phone):
+    name = str(customer.get("name") or "Macmiil").strip()
+    balance = float(customer.get("amount") or 0)
 
-    shopkeeper_name = str(shopkeeper_name or "").strip()
-    shopkeeper_phone = str(shopkeeper_phone or "").strip()
+    business_user_name = str(business_user_name or "").strip()
+    business_user_phone = str(business_user_phone or "").strip()
 
     sender = (
-        f"{shopkeeper_name} (+{shopkeeper_phone})"
-        if shopkeeper_name
-        else f"+{shopkeeper_phone}"
+        f"{business_user_name} (+{business_user_phone})"
+        if business_user_name
+        else f"+{business_user_phone}"
     )
 
     return (
@@ -160,7 +160,7 @@ INSTANCE_ID = os.getenv("GREEN_API_INSTANCE_ID", "710722758620")
 GREEN_API_TOKEN = os.getenv("GREEN_API_TOKEN", "")
 GREEN_API_BASE = os.getenv("GREEN_API_BASE", "https://7107.api.greenapi.com")
 
-SYSTEM_PROMPT = """You are Daynjir, a Somali debt management assistant for small shopkeepers. 
+SYSTEM_PROMPT = """You are Daynjir, a Somali debt management assistant for small businesses. 
 Extract transaction intent from chaotic, unstructured Somali text into raw JSON. 
 Do not include any conversational filler, markdown syntax, or backticks.
 
@@ -584,8 +584,8 @@ def _name_similarity(requested, stored):
     return 0.65 * token_score + 0.35 * difflib.SequenceMatcher(None, requested_norm, stored_norm).ratio()
 
 
-def resolve_name_from_original_message(shopkeeper_id, message_text, ai_name):
-    """Recover a complete stored debtor name when the original message contains it.
+def resolve_customer_name_from_original_message(business_user_id, message_text, ai_name):
+    """Recover a complete stored customer name when the original message contains it.
 
     This corrects cases where the AI extracts only the first name from a full
     name such as 'Edit Hinda bire oct 10'. It only resolves names that actually
@@ -601,9 +601,9 @@ def resolve_name_from_original_message(shopkeeper_id, message_text, ai_name):
         return None
 
     result = (
-        supabase.table("debtors")
+        supabase.table("customers")
         .select("name")
-        .eq("shopkeeper_id", shopkeeper_id)
+        .eq("business_user_id", business_user_id)
         .execute()
     )
     stored_names = {}
@@ -654,12 +654,12 @@ def resolve_name_from_original_message(shopkeeper_id, message_text, ai_name):
     unique_names = {c[3] for c in best}
     if len(unique_names) == 1:
         resolved = next(iter(unique_names))
-        print(f"🔎 Recovered full debtor name from original message: {ai_name!r} -> {resolved!r} (score={best_score:.3f})")
+        print(f"🔎 Recovered full customer name from original message: {ai_name!r} -> {resolved!r} (score={best_score:.3f})")
         return resolved
     return None
 
 
-def find_debtor_matches(shopkeeper_id, name):
+def find_customer_matches(business_user_id, name):
     """Find exact names first, then aligned partial names, then safe fuzzy matches.
 
     A fuzzy match is not silently selected when another distinct customer name is
@@ -670,9 +670,9 @@ def find_debtor_matches(shopkeeper_id, name):
         return []
 
     result = (
-        supabase.table("debtors")
+        supabase.table("customers")
         .select("*")
-        .eq("shopkeeper_id", shopkeeper_id)
+        .eq("business_user_id", business_user_id)
         .order("name")
         .execute()
     )
@@ -735,11 +735,11 @@ def find_debtor_matches(shopkeeper_id, name):
 def ask_for_full_name(sender_phone, matches, action):
     message = "⚠️ Dad isku magac ah ayaan helay:\n\n"
 
-    for number, debtor in enumerate(matches, start=1):
-        due_date = debtor.get("promised_date") or "lama gelin"
+    for number, customer in enumerate(matches, start=1):
+        due_date = customer.get("promised_date") or "lama gelin"
         message += (
-            f"{number}. {debtor['name']} — "
-            f"${debtor['amount']} — Ballan: {due_date}\n"
+            f"{number}. {customer['name']} — "
+            f"${customer['amount']} — Ballan: {due_date}\n"
         )
 
     if action == "PAY":
@@ -863,16 +863,16 @@ async def whatsapp_webhook(request: Request):
                     return {"status": "missing_columns"}
                 
                 try:
-                    sk_query = supabase.table("shopkeepers").select("*").eq("phone_number", sender_phone).execute()
+                    sk_query = supabase.table("business_users").select("*").eq("phone_number", sender_phone).execute()
                     if not sk_query.data:
-                        sk_insert = supabase.table("shopkeepers").insert({"phone_number": sender_phone}).execute()
-                        shopkeeper_id = sk_insert.data[0]["id"]
+                        sk_insert = supabase.table("business_users").insert({"phone_number": sender_phone}).execute()
+                        business_user_id = sk_insert.data[0]["id"]
                     else:
-                        shopkeeper_id = sk_query.data[0]["id"]
+                        business_user_id = sk_query.data[0]["id"]
                 except Exception as db_err:
                     print(f"❌ DATABASE ERROR: {db_err}")
                     send_whatsapp(sender_phone, "❌ Database error.")
-                    return {"status": "shopkeeper_db_error"}
+                    return {"status": "business_user_db_error"}
                 
                 added_count = 0
                 failed_count = 0
@@ -923,8 +923,8 @@ async def whatsapp_webhook(request: Request):
 
                         starting_amount = float(amount)
 
-                        debtor_data = {
-                            "shopkeeper_id": shopkeeper_id,
+                        customer_data = {
+                            "business_user_id": business_user_id,
                             "name": name,
                             "amount": starting_amount,
                             "original_amount": starting_amount,
@@ -932,7 +932,7 @@ async def whatsapp_webhook(request: Request):
                             "is_paid": False
                         }
 
-                        supabase.table("debtors").insert(debtor_data).execute()
+                        supabase.table("customers").insert(customer_data).execute()
                         added_count += 1
                         print(f"  ✅ Added: {name} - ${amount}")
                         
@@ -989,7 +989,7 @@ async def whatsapp_webhook(request: Request):
 
         try:
             applicant = (
-                supabase.table("shopkeepers")
+                supabase.table("business_users")
                 .select("id, phone_number")
                 .eq("phone_number", applicant_phone)
                 .execute()
@@ -1000,7 +1000,7 @@ async def whatsapp_webhook(request: Request):
                 return {"status": "applicant_not_found"}
 
             (
-                supabase.table("shopkeepers")
+                supabase.table("business_users")
                 .update({"approval_status": new_status})
                 .eq("phone_number", applicant_phone)
                 .execute()
@@ -1020,10 +1020,10 @@ async def whatsapp_webhook(request: Request):
             send_whatsapp(sender_phone, "❌ Could not update the request. Check server logs.")
             return {"status": "approval_update_error"}
 
-    # Find this sender's shopkeeper; do NOT auto-create unknown senders here.
+    # Find this sender's business_user; do NOT auto-create unknown senders here.
     try:
         sk_query = (
-            supabase.table("shopkeepers")
+            supabase.table("business_users")
             .select("id, phone_number, name, approval_status")
             .eq("phone_number", sender_phone)
             .execute()
@@ -1036,22 +1036,22 @@ async def whatsapp_webhook(request: Request):
             )
             return {"status": "not_registered"}
 
-        shopkeeper = sk_query.data[0]
-        if shopkeeper.get("approval_status") != "approved":
+        business_user = sk_query.data[0]
+        if business_user.get("approval_status") != "approved":
             send_whatsapp(
                 sender_phone,
                 "⏳ Your request is pending approval. Please wait for the owner."
             )
             return {"status": "not_approved"}
 
-        shopkeeper_id = shopkeeper["id"]
+        business_user_id = business_user["id"]
 
     except Exception as db_err:
         print(f"❌ DATABASE ERROR (Shopkeepers Lookup): {db_err}")
-        return {"status": "shopkeeper_db_error"}
+        return {"status": "business_user_db_error"}
 
     # Manual debt-reminder workflow: fully rule-based, no Groq request.
-    # Start: XUSUUSIN -> numbered unpaid-debtor list -> "1,3" -> confirmation.
+    # Start: XUSUUSIN -> numbered unpaid-customer list -> "1,3" -> confirmation.
     reminder_text = str(message_text or "").strip()
     reminder_state = REMINDER_SESSIONS.get(sender_phone)
 
@@ -1068,16 +1068,16 @@ async def whatsapp_webhook(request: Request):
 
     if is_reminder_start_command(reminder_text):
         try:
-            debtor_result = (
-                supabase.table("debtors")
+            customer_result = (
+                supabase.table("customers")
                 .select("id, name, amount, phone_number, is_paid")
-                .eq("shopkeeper_id", shopkeeper_id)
+                .eq("business_user_id", business_user_id)
                 .eq("is_paid", False)
                 .order("name")
                 .execute()
             )
             all_unpaid = [
-                row for row in (debtor_result.data or [])
+                row for row in (customer_result.data or [])
                 if float(row.get("amount") or 0) > 0
             ]
             eligible = []
@@ -1096,17 +1096,17 @@ async def whatsapp_webhook(request: Request):
                     sender_phone,
                     "ℹ️ Macmiilkan ma isticmaalo WhatsApp hubi in numberku saxan yahay."
                 )
-                return {"status": "no_reminder_eligible_debtors"}
+                return {"status": "no_reminder_eligible_customers"}
 
             REMINDER_SESSIONS[sender_phone] = {
-                "shopkeeper_id": shopkeeper_id,
+                "business_user_id": business_user_id,
                 "stage": "selecting",
-                "debtors": eligible,
+                "customers": eligible,
                 "selected": [],
                 "expires_at": datetime.now(timezone.utc) + REMINDER_SESSION_TTL,
             }
             send_whatsapp(sender_phone, format_reminder_list(eligible, missing_phone_count))
-            print(f"📣 Reminder selection started: shopkeeper={shopkeeper_id}, eligible={len(eligible)}, missing_phone={missing_phone_count}")
+            print(f"📣 Reminder selection started: business_user={business_user_id}, eligible={len(eligible)}, missing_phone={missing_phone_count}")
             return {"status": "reminder_selection_started", "eligible": len(eligible)}
         except Exception as reminder_err:
             print(f"❌ REMINDER LIST ERROR: {reminder_err}")
@@ -1120,36 +1120,36 @@ async def whatsapp_webhook(request: Request):
 
     if reminder_state and reminder_state.get("stage") == "selecting":
         selected_numbers = parse_reminder_selection(
-            reminder_text, len(reminder_state.get("debtors", []))
+            reminder_text, len(reminder_state.get("customers", []))
         )
         if selected_numbers:
-            selected_debtors = [
-                reminder_state["debtors"][number - 1]
+            selected_customers = [
+                reminder_state["customers"][number - 1]
                 for number in selected_numbers
             ]
             reminder_state["selected"] = selected_numbers
             reminder_state["stage"] = "confirming"
             reminder_state["expires_at"] = datetime.now(timezone.utc) + REMINDER_SESSION_TTL
             preview_lines = ["🔎 *XUSUUSINTA LA DOORTAY*", ""]
-            for debtor in selected_debtors:
+            for customer in selected_customers:
                 preview_lines.append(
-                    f"• {debtor.get('name')} — ${float(debtor.get('amount') or 0):.2f}"
+                    f"• {customer.get('name')} — ${float(customer.get('amount') or 0):.2f}"
                 )
-            total = sum(float(row.get("amount") or 0) for row in selected_debtors)
+            total = sum(float(row.get("amount") or 0) for row in selected_customers)
             preview_lines.extend([
                 "",
-                f"👥 Tirada: {len(selected_debtors)} macmiil",
+                f"👥 Tirada: {len(selected_customers)} macmiil",
                 f"💰 Wadarta deynta: ${total:.2f}",
                 "",
                 "Haddii aad hubisay, soo qor *HAA DIR* si fariimaha loo diro.",
                 "Haddii kale soo qor *JOOJI*."
             ])
             send_whatsapp(sender_phone, "\n".join(preview_lines))
-            return {"status": "reminder_selection_confirm_required", "selected": len(selected_debtors)}
+            return {"status": "reminder_selection_confirm_required", "selected": len(selected_customers)}
         if re.fullmatch(r"\s*\d+(?:\s*[,; ]\s*\d+)*\s*", reminder_text):
             send_whatsapp(
                 sender_phone,
-                f"❌ Xulasho khaldan. Geli lambarro u dhexeeya 1 iyo {len(reminder_state.get('debtors', []))}, tusaale *1,3*; ama soo qor *JOOJI*."
+                f"❌ Xulasho khaldan. Geli lambarro u dhexeeya 1 iyo {len(reminder_state.get('customers', []))}, tusaale *1,3*; ama soo qor *JOOJI*."
             )
             return {"status": "invalid_reminder_selection"}
         # A non-selection message exits this temporary flow and is handled
@@ -1161,7 +1161,7 @@ async def whatsapp_webhook(request: Request):
         if is_reminder_confirm_command(reminder_text):
             # Pop before network calls so a repeated confirmation cannot resend.
             state = REMINDER_SESSIONS.pop(sender_phone, None)
-            if not state or state.get("shopkeeper_id") != shopkeeper_id:
+            if not state or state.get("business_user_id") != business_user_id:
                 send_whatsapp(sender_phone, "⌛ Xulashadu ma jirto ama way dhacday. Soo qor *XUSUUSIN* mar kale.")
                 return {"status": "reminder_state_missing"}
 
@@ -1169,13 +1169,13 @@ async def whatsapp_webhook(request: Request):
             skipped_count = 0
             failed_count = 0
             for number in state.get("selected") or []:
-                original = state["debtors"][number - 1]
+                original = state["customers"][number - 1]
                 try:
                     fresh_result = (
-                        supabase.table("debtors")
+                        supabase.table("customers")
                         .select("id, name, amount, phone_number, is_paid")
                         .eq("id", original["id"])
-                        .eq("shopkeeper_id", shopkeeper_id)
+                        .eq("business_user_id", business_user_id)
                         .execute()
                     )
                     if not fresh_result.data:
@@ -1192,10 +1192,10 @@ async def whatsapp_webhook(request: Request):
 
                     send_ok = send_whatsapp(
                         target_phone,
-                        build_debt_reminder(
+                        build_payment_reminder(
                             fresh,
-                            shopkeeper.get("name"),
-                            shopkeeper.get("phone_number") or sender_phone,
+                            business_user.get("name"),
+                            business_user.get("phone_number") or sender_phone,
                         ),
                     )
                     if send_ok is False:
@@ -1204,7 +1204,7 @@ async def whatsapp_webhook(request: Request):
                         sent_count += 1
                 except Exception as send_err:
                     failed_count += 1
-                    print(f"❌ REMINDER SEND ERROR for debtor id={original.get('id')}: {send_err}")
+                    print(f"❌ REMINDER SEND ERROR for customer id={original.get('id')}: {send_err}")
 
             report = (
                 "📣 *NATIIJADA XUSUUSINTA*\n\n"
@@ -1232,7 +1232,7 @@ async def whatsapp_webhook(request: Request):
     pdf_customer_name = None
     if pdf_only_requested:
         previous_statement = LAST_HISTORY_REQUESTS.get(sender_phone)
-        if not previous_statement or previous_statement.get("shopkeeper_id") != shopkeeper_id:
+        if not previous_statement or previous_statement.get("business_user_id") != business_user_id:
             send_whatsapp(
                 sender_phone,
                 "ℹ️ Marka hore codso xisaabta macmiilka, tusaale: *Cali taariikh*. "
@@ -1286,7 +1286,7 @@ async def whatsapp_webhook(request: Request):
                 print("🛟 Continuing through shared Supabase transaction logic; Groq will be tried again on the next message.")
             else:
                 # A plain customer name is a safe SEARCH only if it matches this
-                # shopkeeper's own records; unsupported text must never create debt.
+                # business_user's own records; unsupported text must never create debt.
                 raw_query = str(message_text or "").strip()
                 has_date_words = bool(re.search(
                     r"\b(?:today|tomorrow|maanta|berri|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b|\b\d{4}-\d{1,2}-\d{1,2}\b|\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b",
@@ -1294,7 +1294,7 @@ async def whatsapp_webhook(request: Request):
                 ))
                 if raw_query and not has_date_words and not re.search(r"[,$]\s*\d|\d\s*\$", raw_query):
                     try:
-                        fallback_matches = find_debtor_matches(shopkeeper_id, raw_query)
+                        fallback_matches = find_customer_matches(business_user_id, raw_query)
                     except Exception as fallback_err:
                         print(f"⚠️ Local customer-search fallback failed: {fallback_err}")
                         fallback_matches = []
@@ -1439,8 +1439,8 @@ async def whatsapp_webhook(request: Request):
         # Recover the full stored name from the original WhatsApp message if AI shortened it.
         if name and action in {"PAY", "EDIT", "DELETE", "HISTORY", "SEARCH"}:
             try:
-                recovered_name = resolve_name_from_original_message(
-                    shopkeeper_id, message_text, name
+                recovered_name = resolve_customer_name_from_original_message(
+                    business_user_id, message_text, name
                 )
                 if recovered_name:
                     name = recovered_name
@@ -1463,15 +1463,15 @@ async def whatsapp_webhook(request: Request):
                 # Keep promised_date as None when the user did not specify a due date.
                 
                 if new_phone and not amount:
-                    phone_matches = find_debtor_matches(shopkeeper_id, name)
+                    phone_matches = find_customer_matches(business_user_id, name)
                     distinct_phone_names = {normalize_customer_name(d.get("name")) for d in phone_matches}
                     if len(distinct_phone_names) > 1:
                         ask_for_full_name(sender_phone, phone_matches, "EDIT")
                         continue
                     if phone_matches:
                         matched_name = phone_matches[0]["name"]
-                        updated = (supabase.table("debtors").update({"phone_number": new_phone})
-                                   .eq("shopkeeper_id", shopkeeper_id).eq("name", matched_name).execute())
+                        updated = (supabase.table("customers").update({"phone_number": new_phone})
+                                   .eq("business_user_id", business_user_id).eq("name", matched_name).execute())
                         if updated.data:
                             send_whatsapp(sender_phone, f"✅ {matched_name} phone number saved: {new_phone}")
                             successful_inserts.append(entry)
@@ -1481,16 +1481,16 @@ async def whatsapp_webhook(request: Request):
                         continue
                     else:
                         send_whatsapp(sender_phone, f"❌ Lama helin qofka {name} si lambarkiisa loo kaydiyo.")
-                        failed_inserts.append({"name": name, "reason": "Debtor not found for phone update"})
+                        failed_inserts.append({"name": name, "reason": "Customer not found for phone update"})
                         continue
                 
                 # Amounts without an explicit EDIT / "ka dhig" are additive.
                 # If this customer already has exactly one active debt, update
-                # that row instead of creating a duplicate debtor/debt record.
+                # that row instead of creating a duplicate customer/debt record.
                 # If the name is ambiguous or multiple active rows exist, ask
                 # the user rather than changing the wrong balance.
                 if amount is not None and not new_phone:
-                    matches = find_debtor_matches(shopkeeper_id, name)
+                    matches = find_customer_matches(business_user_id, name)
                     distinct_names = {normalize_customer_name(row.get("name")) for row in matches}
                     if len(distinct_names) > 1:
                         ask_for_full_name(sender_phone, matches, "EDIT")
@@ -1529,10 +1529,10 @@ async def whatsapp_webhook(request: Request):
                             update_data["phone_number"] = new_phone
 
                         updated_result = (
-                            supabase.table("debtors")
+                            supabase.table("customers")
                             .update(update_data)
                             .eq("id", existing["id"])
-                            .eq("shopkeeper_id", shopkeeper_id)
+                            .eq("business_user_id", business_user_id)
                             .select("id, name, amount, promised_date, is_paid")
                             .execute()
                         )
@@ -1560,8 +1560,8 @@ async def whatsapp_webhook(request: Request):
                         name = matches[0].get("name") or name
                         entry["customer_name"] = name
 
-                debtor_data = {
-                    'shopkeeper_id': shopkeeper_id,
+                customer_data = {
+                    'business_user_id': business_user_id,
                     'name': name,
                     'amount': float(amount) if amount is not None else 0,
                     'promised_date': promised_date,
@@ -1569,7 +1569,7 @@ async def whatsapp_webhook(request: Request):
                     'is_paid': False
                 }
 
-                result = supabase.table("debtors").insert(debtor_data).execute()
+                result = supabase.table("customers").insert(customer_data).execute()
                 if not result.data:
                     send_whatsapp(sender_phone, f"❌ Deynta {name} lama diiwaangelin. Database-ku wax jawaab ah ma soo celin.")
                     failed_inserts.append({"name": name, "reason": "Insert returned no rows"})
@@ -1583,32 +1583,32 @@ async def whatsapp_webhook(request: Request):
             try:
                 payment_amount = entry.get("amount")
                 payment_type = str(entry.get("payment_type") or "UNKNOWN").upper()
-                matches = find_debtor_matches(shopkeeper_id, name)
+                matches = find_customer_matches(business_user_id, name)
 
                 if len(matches) == 0:
                     send_whatsapp(sender_phone, f"❌ Lama helin deynta aan weli la bixin ee {name}.")
-                    failed_inserts.append({"name": name, "reason": "Unpaid debtor not found"})
+                    failed_inserts.append({"name": name, "reason": "Unpaid customer not found"})
                     continue
 
                 if len(matches) > 1:
                     ask_for_full_name(sender_phone, matches, "PAY")
                     continue
 
-                debtor = matches[0]
-                current_balance = float(debtor.get("amount") or 0)
+                customer = matches[0]
+                current_balance = float(customer.get("amount") or 0)
 
-                if current_balance <= 0 or debtor.get("is_paid") is True:
-                    send_whatsapp(sender_phone, f"✅ {debtor['name']} hore ayuu u bixiyay deyntiisa.")
+                if current_balance <= 0 or customer.get("is_paid") is True:
+                    send_whatsapp(sender_phone, f"✅ {customer['name']} hore ayuu u bixiyay deyntiisa.")
                     continue
 
                 # A missing amount is a full payment ONLY when the AI explicitly says FULL.
                 if payment_amount is None and payment_type != "FULL":
                     send_whatsapp(
                         sender_phone,
-                        f"💵 {debtor['name']} lacag intee le'eg ayaad ka heshay?\n"
-                        f"Tusaale: {debtor['name']} ka jar $10.\n"
+                        f"💵 {customer['name']} lacag intee le'eg ayaad ka heshay?\n"
+                        f"Tusaale: {customer['name']} ka jar $10.\n"
                         "Haddii uu deynta oo dhan bixiyay, qor: "
-                        f"{debtor['name']} wuu bixiyay deyntii oo dhan."
+                        f"{customer['name']} wuu bixiyay deyntii oo dhan."
                     )
                     continue
 
@@ -1628,7 +1628,7 @@ async def whatsapp_webhook(request: Request):
                 if payment_amount - current_balance > 0.009:
                     send_whatsapp(
                         sender_phone,
-                        f"⚠️ {debtor['name']} haraaga deyntiisu waa ${current_balance:.2f}, "
+                        f"⚠️ {customer['name']} haraaga deyntiisu waa ${current_balance:.2f}, "
                         f"laakiin waxaad sheegtay ${payment_amount:.2f}. Lacag-bixinta lama diiwaangelin "
                         "si aan haraaga uga dhigin tiro taban. Hubi lacagta oo mar kale dir."
                     )
@@ -1640,8 +1640,8 @@ async def whatsapp_webhook(request: Request):
                 # Atomically insert the payment and update the balance inside PostgreSQL.
                 # Apply the companion SQL migration file before deploying this version.
                 rpc_result = supabase.rpc("record_debt_payment", {
-                    "p_debtor_id": str(debtor["id"]),
-                    "p_shopkeeper_id": str(shopkeeper_id),
+                    "p_customer_id": str(customer["id"]),
+                    "p_business_user_id": str(business_user_id),
                     "p_amount": actual_payment,
                 }).execute()
                 rpc_data = rpc_result.data
@@ -1649,20 +1649,20 @@ async def whatsapp_webhook(request: Request):
                     rpc_data = rpc_data[0] if rpc_data else None
                 if not isinstance(rpc_data, dict) or not rpc_data.get("id"):
                     raise RuntimeError("record_debt_payment returned no debt row; apply supabase_record_debt_payment.sql and check RLS")
-                updated_debtor = rpc_data
-                new_balance = float(updated_debtor.get("amount") or 0)
-                is_now_paid = bool(updated_debtor.get("is_paid")) or new_balance <= 0
+                updated_customer = rpc_data
+                new_balance = float(updated_customer.get("amount") or 0)
+                is_now_paid = bool(updated_customer.get("is_paid")) or new_balance <= 0
                 if is_now_paid:
                     send_whatsapp(
                         sender_phone,
-                        f"✅ {updated_debtor['name']} deyntii oo dhan waa la bixiyay. "
+                        f"✅ {updated_customer['name']} deyntii oo dhan waa la bixiyay. "
                         f"Lacagta la diiwaangeliyay: ${actual_payment:.2f}."
                     )
                 else:
                     send_whatsapp(
                         sender_phone,
-                        f"✅ {updated_debtor['name']} wuxuu bixiyay ${actual_payment:.2f}. "
-                        f"Haray: ${float(updated_debtor['amount']):.2f}."
+                        f"✅ {updated_customer['name']} wuxuu bixiyay ${actual_payment:.2f}. "
+                        f"Haray: ${float(updated_customer['amount']):.2f}."
                     )
 
             except Exception as e:
@@ -1690,9 +1690,9 @@ async def whatsapp_webhook(request: Request):
 
                 # Start with unpaid debts only
                 query = (
-                    supabase.table("debtors")
+                    supabase.table("customers")
                     .select("*")
-                    .eq("shopkeeper_id", shopkeeper_id)
+                    .eq("business_user_id", business_user_id)
                     .eq("is_paid", False)
                 )
 
@@ -1738,11 +1738,11 @@ async def whatsapp_webhook(request: Request):
                 today = today_eat()
 
                 for index, debt in enumerate(debts_query.data, start=1):
-                    debtor_name = debt["name"]
-                    debtor_amount = float(debt["amount"])
+                    customer_name = debt["name"]
+                    customer_amount = float(debt["amount"])
                     due_date = debt.get("promised_date")
 
-                    total += debtor_amount
+                    total += customer_amount
 
                     if wants_due_dates:
                         status = ""
@@ -1771,14 +1771,14 @@ async def whatsapp_webhook(request: Request):
                                 status = f" 📅 {due_date}"
 
                         debt_list.append(
-                            f"{index}. {debtor_name}: "
-                            f"${debtor_amount:.2f}{status} "
+                            f"{index}. {customer_name}: "
+                            f"${customer_amount:.2f}{status} "
                             f"— Ballan: {due_date or 'lama gelin'}"
                         )
                     else:
                         debt_list.append(
-                            f"{index}. {debtor_name}: "
-                            f"${debtor_amount:.2f}"
+                            f"{index}. {customer_name}: "
+                            f"${customer_amount:.2f}"
                         )
 
                 message = (
@@ -1816,11 +1816,11 @@ async def whatsapp_webhook(request: Request):
 
         elif action == "EDIT":
             try:
-                matches = find_debtor_matches(shopkeeper_id, name)
+                matches = find_customer_matches(business_user_id, name)
 
                 if len(matches) == 0:
                     send_whatsapp(sender_phone, f"❌ Lama helin deynta aan weli la bixin ee {name}.")
-                    failed_inserts.append({"name": name, "reason": "Debtor not found"})
+                    failed_inserts.append({"name": name, "reason": "Customer not found"})
                     continue
 
                 if date_only_update:
@@ -1862,7 +1862,7 @@ async def whatsapp_webhook(request: Request):
                     ask_for_full_name(sender_phone, matches, "EDIT")
                     continue
 
-                debtor = matches[0]
+                customer = matches[0]
                 update_data = {}
 
                 # Fallbacks support inconsistent model output, e.g. amount instead of new_amount.
@@ -1900,10 +1900,10 @@ async def whatsapp_webhook(request: Request):
                     continue
 
                 result = (
-                    supabase.table("debtors")
+                    supabase.table("customers")
                     .update(update_data)
-                    .eq("id", debtor["id"])
-                    .eq("shopkeeper_id", shopkeeper_id)
+                    .eq("id", customer["id"])
+                    .eq("business_user_id", business_user_id)
                     .select("id, name, amount, promised_date, is_paid")
                     .execute()
                 )
@@ -1915,9 +1915,9 @@ async def whatsapp_webhook(request: Request):
                 updated = result.data[0]
                 changes = []
                 if "amount" in update_data:
-                    changes.append(f"💵 Lacag: ${float(debtor['amount']):.2f} → ${float(updated['amount']):.2f}")
+                    changes.append(f"💵 Lacag: ${float(customer['amount']):.2f} → ${float(updated['amount']):.2f}")
                 if "promised_date" in update_data:
-                    changes.append(f"📅 Ballan: {debtor.get('promised_date') or 'lama gelin'} → {updated['promised_date']}")
+                    changes.append(f"📅 Ballan: {customer.get('promised_date') or 'lama gelin'} → {updated['promised_date']}")
 
                 send_whatsapp(sender_phone, f"✅ {updated['name']} waa la cusboonaysiiyay:\n" + "\n".join(changes))
                 successful_inserts.append(entry)
@@ -1929,13 +1929,13 @@ async def whatsapp_webhook(request: Request):
         
         elif action == "DELETE":
             try:
-                matches = find_debtor_matches(shopkeeper_id, name)
+                matches = find_customer_matches(business_user_id, name)
 
                 if len(matches) == 0:
                     send_whatsapp(sender_phone, f"❌ Lama helin {name}.")
                     failed_inserts.append({
                         "name": name,
-                        "reason": "Debtor not found"
+                        "reason": "Customer not found"
                     })
                     continue
 
@@ -1943,19 +1943,19 @@ async def whatsapp_webhook(request: Request):
                     ask_for_full_name(sender_phone, matches, "DELETE")
                     continue
 
-                debtor = matches[0]
+                customer = matches[0]
 
                 (
-                    supabase.table("debtors")
+                    supabase.table("customers")
                     .delete()
-                    .eq("id", debtor["id"])
-                    .eq("shopkeeper_id", shopkeeper_id)
+                    .eq("id", customer["id"])
+                    .eq("business_user_id", business_user_id)
                     .execute()
                 )
 
                 send_whatsapp(
                     sender_phone,
-                    f"✅ Deynta {debtor['name']} (${debtor['amount']}) waa la tirtiray."
+                    f"✅ Deynta {customer['name']} (${customer['amount']}) waa la tirtiray."
                 )
                 successful_inserts.append(entry)
 
@@ -1972,7 +1972,7 @@ async def whatsapp_webhook(request: Request):
         
         elif action == "SEARCH":
             try:
-                search_matches = find_debtor_matches(shopkeeper_id, name)
+                search_matches = find_customer_matches(business_user_id, name)
                 if not search_matches:
                     send_whatsapp(sender_phone, f"❌ Lama helin qofka {name}. Hubi higgaadda magaca ama isku day magaciisa oo buuxa.")
                     continue
@@ -2019,7 +2019,7 @@ async def whatsapp_webhook(request: Request):
         elif action == "HISTORY":
             try:
                 # Full customer statement: debt records, payment events, and current outstanding balance.
-                history_matches = find_debtor_matches(shopkeeper_id, name)
+                history_matches = find_customer_matches(business_user_id, name)
 
                 if not history_matches:
                     send_whatsapp(
@@ -2039,7 +2039,7 @@ async def whatsapp_webhook(request: Request):
                         key=lambda d: str(d.get("created_at") or "")
                     )
 
-                    debtor_ids = [
+                    customer_ids = [
                         d.get("id")
                         for d in history_matches
                         if d.get("id") is not None
@@ -2047,12 +2047,12 @@ async def whatsapp_webhook(request: Request):
 
                     payment_rows = []
 
-                    if debtor_ids:
+                    if customer_ids:
                         payment_result = (
                             supabase.table("payments")
-                            .select("amount, paid_at, debtor_id")
-                            .eq("shopkeeper_id", shopkeeper_id)
-                            .in_("debtor_id", debtor_ids)
+                            .select("amount, paid_at, customer_id")
+                            .eq("business_user_id", business_user_id)
+                            .in_("customer_id", customer_ids)
                             .order("paid_at")
                             .execute()
                         )
@@ -2062,7 +2062,7 @@ async def whatsapp_webhook(request: Request):
 
                     for payment in payment_rows:
                         payments_by_debt.setdefault(
-                            str(payment.get("debtor_id")),
+                            str(payment.get("customer_id")),
                             []
                         ).append(payment)
 
@@ -2158,7 +2158,7 @@ async def whatsapp_webhook(request: Request):
                     )
 
                     LAST_HISTORY_REQUESTS[sender_phone] = {
-                        "shopkeeper_id": shopkeeper_id,
+                        "business_user_id": business_user_id,
                         "customer_name": matched_customer_name,
                     }
 
@@ -2224,9 +2224,9 @@ async def whatsapp_webhook(request: Request):
         elif action == "REPORT":
             try:
                 all_debts_result = (
-                    supabase.table("debtors")
+                    supabase.table("customers")
                     .select("*")
-                    .eq("shopkeeper_id", shopkeeper_id)
+                    .eq("business_user_id", business_user_id)
                     .execute()
                 )
 
@@ -2276,8 +2276,8 @@ async def whatsapp_webhook(request: Request):
 
                 payments_result = (
                     supabase.table("payments")
-                    .select("amount, paid_at, debtor_id")
-                    .eq("shopkeeper_id", shopkeeper_id)
+                    .select("amount, paid_at, customer_id")
+                    .eq("business_user_id", business_user_id)
                     .gte("paid_at", start_iso)
                     .lt("paid_at", end_iso)
                     .execute()
@@ -2367,9 +2367,9 @@ async def whatsapp_webhook(request: Request):
         elif action == "EXPORT":
             try:
                 all_debts_result = (
-                    supabase.table("debtors")
+                    supabase.table("customers")
                     .select("*")
-                    .eq("shopkeeper_id", shopkeeper_id)
+                    .eq("business_user_id", business_user_id)
                     .order("promised_date", desc=False)
                     .execute()
                 )
@@ -2508,15 +2508,15 @@ async def daily_digest(request: Request):
     today = today_eat().isoformat()
     print(f"📅 Today's date: {today}")
     
-    shopkeepers = supabase.table("shopkeepers").select("*").execute()
-    print(f"👥 Found {len(shopkeepers.data)} shopkeepers")
+    business_users = supabase.table("business_users").select("*").execute()
+    print(f"👥 Found {len(business_users.data)} business users")
     
-    for sk in shopkeepers.data:
-        sk_id = sk["id"]
+    for sk in business_users.data:
+        business_user_id = sk["id"]
         sk_phone = sk["phone_number"]
-        print(f"📱 Processing shopkeeper: {sk_phone} (ID: {sk_id})")
+        print(f"📱 Processing business user: {sk_phone} (ID: {business_user_id})")
         
-        debt_records = supabase.table("debtors").select("*").eq("shopkeeper_id", sk_id).eq("is_paid", False).execute()
+        debt_records = supabase.table("customers").select("*").eq("business_user_id", business_user_id).eq("is_paid", False).execute()
         print(f"💰 Found {len(debt_records.data)} unpaid debts")
         
         if not debt_records.data:
@@ -2560,17 +2560,17 @@ async def evening_checkin(request: Request):
     start_iso = start_utc.isoformat()
     end_iso = end_utc.isoformat()
 
-    shopkeepers = supabase.table("shopkeepers").select("*").execute()
+    business_users = supabase.table("business_users").select("*").execute()
 
-    for shopkeeper in shopkeepers.data or []:
-        shopkeeper_id = shopkeeper["id"]
-        shopkeeper_phone = shopkeeper["phone_number"]
+    for business_user in business_users.data or []:
+        business_user_id = business_user["id"]
+        business_user_phone = business_user["phone_number"]
 
         # Debts newly recorded today.
         new_debts_result = (
-            supabase.table("debtors")
+            supabase.table("customers")
             .select("name, amount, created_at")
-            .eq("shopkeeper_id", shopkeeper_id)
+            .eq("business_user_id", business_user_id)
             .gte("created_at", start_iso)
             .lt("created_at", end_iso)
             .execute()
@@ -2580,8 +2580,8 @@ async def evening_checkin(request: Request):
         # Payments recorded today.
         payments_result = (
             supabase.table("payments")
-            .select("amount, paid_at, debtor_id")
-            .eq("shopkeeper_id", shopkeeper_id)
+            .select("amount, paid_at, customer_id")
+            .eq("business_user_id", business_user_id)
             .gte("paid_at", start_iso)
             .lt("paid_at", end_iso)
             .execute()
@@ -2612,21 +2612,21 @@ async def evening_checkin(request: Request):
                 lines.append("💵 *Daynta maanta kuusoo xarootay:*")
 
                 for payment in payments:
-                    debtor_result = (
-                        supabase.table("debtors")
+                    customer_result = (
+                        supabase.table("customers")
                         .select("name")
-                        .eq("id", payment["debtor_id"])
-                        .eq("shopkeeper_id", shopkeeper_id)
+                        .eq("id", payment["customer_id"])
+                        .eq("business_user_id", business_user_id)
                         .limit(1)
                         .execute()
                     )
-                    debtor_name = (
-                        debtor_result.data[0]["name"]
-                        if debtor_result.data
+                    customer_name = (
+                        customer_result.data[0]["name"]
+                        if customer_result.data
                         else "Macmiil"
                     )
                     lines.append(
-                        f"• {debtor_name}: ${float(payment['amount']):.2f}"
+                        f"• {customer_name}: ${float(payment['amount']):.2f}"
                     )
             else:
                 lines.append("")
@@ -2639,7 +2639,7 @@ async def evening_checkin(request: Request):
                 "fadlan ii soo dir magaca iyo lacagta."
             ])
 
-        send_whatsapp(shopkeeper_phone, "\n".join(lines))
+        send_whatsapp(business_user_phone, "\n".join(lines))
 
     return {"status": "evening_checkin_sent"}
 
