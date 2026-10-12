@@ -1032,7 +1032,9 @@ async def whatsapp_webhook(request: Request):
         if not sk_query.data:
             send_whatsapp(
                 sender_phone,
-                "⏳ You are not registered."
+                "⏳ 👋 Ku soo dhawoow Daynjir.
+Lambarkan wuxuu u adeegaa ganacsiyada.  
+Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
             )
             return {"status": "not_registered"}
 
