@@ -1032,7 +1032,7 @@ async def whatsapp_webhook(request: Request):
         if not sk_query.data:
             send_whatsapp(
                 sender_phone,
-                "⏳ You are not registered. Send JOIN to request access."
+                "⏳ You are not registered."
             )
             return {"status": "not_registered"}
 
