@@ -1032,7 +1032,7 @@ async def whatsapp_webhook(request: Request):
         if not sk_query.data:
             send_whatsapp(
                 sender_phone,
-                "⏳ Ku soo dhawoow Daynjir.
+                "⏳ Ku soo dhawoow Daynjir.\n\n"
 Lambarkan wuxuu u adeegaa maamulka ganacsiyada.  
 Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
             )
