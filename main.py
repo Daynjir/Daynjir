@@ -1033,10 +1033,10 @@ async def whatsapp_webhook(request: Request):
             send_whatsapp(
                 sender_phone,
                 "⏳ Ku soo dhawoow Daynjir.\n\n"
-Lambarkan wuxuu u adeegaa maamulka ganacsiyada.  
-Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
-            )
-            return {"status": "not_registered"}
+    "Lambarkan wuxuu u adeegaa maamulka ganacsiyada.\n"
+    "Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
+)
+return {"status": "not_registered"}
 
         shopkeeper = sk_query.data[0]
         if shopkeeper.get("approval_status") != "approved":
