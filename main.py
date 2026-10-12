@@ -111,10 +111,10 @@ def format_reminder_list(customers, missing_phone_count=0):
         "Dooro lambarrada macaamiisha aad rabto in la xusuusiyo.",
         "",
     ]
-    for index, customer in enumerate(customers, start=1):
+    for index, debtor in enumerate(customers, start=1):
         lines.append(
-            f"{index}. {customer.get('name') or 'Magac la’aan'} — "
-            f"${float(customer.get('amount') or 0):.2f}"
+            f"{index}. {debtor.get('name') or 'Magac la’aan'} — "
+            f"${float(debtor.get('amount') or 0):.2f}"
         )
     lines.extend([
         "",
@@ -127,17 +127,17 @@ def format_reminder_list(customers, missing_phone_count=0):
             f"ℹ️ {missing_phone_count} Lanbarkan ma saxna ama laguma isticmaalo WhatsApp.",
         ])
     return "\n".join(lines)
-def build_payment_reminder(customer, business_user_name, business_user_phone):
-    name = str(customer.get("name") or "Macmiil").strip()
-    balance = float(customer.get("amount") or 0)
+def build_debt_reminder(debtor, shopkeeper_name, shopkeeper_phone):
+    name = str(debtor.get("name") or "Macmiil").strip()
+    balance = float(debtor.get("amount") or 0)
 
-    business_user_name = str(business_user_name or "").strip()
-    business_user_phone = str(business_user_phone or "").strip()
+    shopkeeper_name = str(shopkeeper_name or "").strip()
+    shopkeeper_phone = str(shopkeeper_phone or "").strip()
 
     sender = (
-        f"{business_user_name} (+{business_user_phone})"
-        if business_user_name
-        else f"+{business_user_phone}"
+        f"{shopkeeper_name} (+{shopkeeper_phone})"
+        if shopkeeper_name
+        else f"+{shopkeeper_phone}"
     )
 
     return (
@@ -160,7 +160,7 @@ INSTANCE_ID = os.getenv("GREEN_API_INSTANCE_ID", "710722758620")
 GREEN_API_TOKEN = os.getenv("GREEN_API_TOKEN", "")
 GREEN_API_BASE = os.getenv("GREEN_API_BASE", "https://7107.api.greenapi.com")
 
-SYSTEM_PROMPT = """You are Daynjir, a Somali debt management assistant for small businesses. 
+SYSTEM_PROMPT = """You are Daynjir, a Somali debt management assistant for small business_users. 
 Extract transaction intent from chaotic, unstructured Somali text into raw JSON. 
 Do not include any conversational filler, markdown syntax, or backticks.
 
@@ -584,8 +584,8 @@ def _name_similarity(requested, stored):
     return 0.65 * token_score + 0.35 * difflib.SequenceMatcher(None, requested_norm, stored_norm).ratio()
 
 
-def resolve_customer_name_from_original_message(business_user_id, message_text, ai_name):
-    """Recover a complete stored customer name when the original message contains it.
+def resolve_name_from_original_message(business_user_id, message_text, ai_name):
+    """Recover a complete stored debtor name when the original message contains it.
 
     This corrects cases where the AI extracts only the first name from a full
     name such as 'Edit Hinda bire oct 10'. It only resolves names that actually
@@ -654,12 +654,12 @@ def resolve_customer_name_from_original_message(business_user_id, message_text, 
     unique_names = {c[3] for c in best}
     if len(unique_names) == 1:
         resolved = next(iter(unique_names))
-        print(f"🔎 Recovered full customer name from original message: {ai_name!r} -> {resolved!r} (score={best_score:.3f})")
+        print(f"🔎 Recovered full debtor name from original message: {ai_name!r} -> {resolved!r} (score={best_score:.3f})")
         return resolved
     return None
 
 
-def find_customer_matches(business_user_id, name):
+def find_debtor_matches(business_user_id, name):
     """Find exact names first, then aligned partial names, then safe fuzzy matches.
 
     A fuzzy match is not silently selected when another distinct customer name is
@@ -735,11 +735,11 @@ def find_customer_matches(business_user_id, name):
 def ask_for_full_name(sender_phone, matches, action):
     message = "⚠️ Dad isku magac ah ayaan helay:\n\n"
 
-    for number, customer in enumerate(matches, start=1):
-        due_date = customer.get("promised_date") or "lama gelin"
+    for number, debtor in enumerate(matches, start=1):
+        due_date = debtor.get("promised_date") or "lama gelin"
         message += (
-            f"{number}. {customer['name']} — "
-            f"${customer['amount']} — Ballan: {due_date}\n"
+            f"{number}. {debtor['name']} — "
+            f"${debtor['amount']} — Ballan: {due_date}\n"
         )
 
     if action == "PAY":
@@ -872,7 +872,7 @@ async def whatsapp_webhook(request: Request):
                 except Exception as db_err:
                     print(f"❌ DATABASE ERROR: {db_err}")
                     send_whatsapp(sender_phone, "❌ Database error.")
-                    return {"status": "business_user_db_error"}
+                    return {"status": "shopkeeper_db_error"}
                 
                 added_count = 0
                 failed_count = 0
@@ -923,7 +923,7 @@ async def whatsapp_webhook(request: Request):
 
                         starting_amount = float(amount)
 
-                        customer_data = {
+                        debtor_data = {
                             "business_user_id": business_user_id,
                             "name": name,
                             "amount": starting_amount,
@@ -932,7 +932,7 @@ async def whatsapp_webhook(request: Request):
                             "is_paid": False
                         }
 
-                        supabase.table("customers").insert(customer_data).execute()
+                        supabase.table("customers").insert(debtor_data).execute()
                         added_count += 1
                         print(f"  ✅ Added: {name} - ${amount}")
                         
@@ -1020,7 +1020,7 @@ async def whatsapp_webhook(request: Request):
             send_whatsapp(sender_phone, "❌ Could not update the request. Check server logs.")
             return {"status": "approval_update_error"}
 
-    # Find this sender's business_user; do NOT auto-create unknown senders here.
+    # Find this sender's shopkeeper; do NOT auto-create unknown senders here.
     try:
         sk_query = (
             supabase.table("business_users")
@@ -1032,28 +1032,28 @@ async def whatsapp_webhook(request: Request):
         if not sk_query.data:
             send_whatsapp(
                 sender_phone,
-                "⏳ 👋 Ku soo dhawoow Daynjir.
-Lambarkan wuxuu u adeegaa ganacsiyada.  
+                "⏳ Ku soo dhawoow Daynjir.
+Lambarkan wuxuu u adeegaa maamulka ganacsiyada.  
 Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
             )
             return {"status": "not_registered"}
 
-        business_user = sk_query.data[0]
-        if business_user.get("approval_status") != "approved":
+        shopkeeper = sk_query.data[0]
+        if shopkeeper.get("approval_status") != "approved":
             send_whatsapp(
                 sender_phone,
                 "⏳ Your request is pending approval. Please wait for the owner."
             )
             return {"status": "not_approved"}
 
-        business_user_id = business_user["id"]
+        business_user_id = shopkeeper["id"]
 
     except Exception as db_err:
         print(f"❌ DATABASE ERROR (Shopkeepers Lookup): {db_err}")
-        return {"status": "business_user_db_error"}
+        return {"status": "shopkeeper_db_error"}
 
     # Manual debt-reminder workflow: fully rule-based, no Groq request.
-    # Start: XUSUUSIN -> numbered unpaid-customer list -> "1,3" -> confirmation.
+    # Start: XUSUUSIN -> numbered unpaid-debtor list -> "1,3" -> confirmation.
     reminder_text = str(message_text or "").strip()
     reminder_state = REMINDER_SESSIONS.get(sender_phone)
 
@@ -1070,7 +1070,7 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
 
     if is_reminder_start_command(reminder_text):
         try:
-            customer_result = (
+            debtor_result = (
                 supabase.table("customers")
                 .select("id, name, amount, phone_number, is_paid")
                 .eq("business_user_id", business_user_id)
@@ -1079,7 +1079,7 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
                 .execute()
             )
             all_unpaid = [
-                row for row in (customer_result.data or [])
+                row for row in (debtor_result.data or [])
                 if float(row.get("amount") or 0) > 0
             ]
             eligible = []
@@ -1108,7 +1108,7 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
                 "expires_at": datetime.now(timezone.utc) + REMINDER_SESSION_TTL,
             }
             send_whatsapp(sender_phone, format_reminder_list(eligible, missing_phone_count))
-            print(f"📣 Reminder selection started: business_user={business_user_id}, eligible={len(eligible)}, missing_phone={missing_phone_count}")
+            print(f"📣 Reminder selection started: shopkeeper={business_user_id}, eligible={len(eligible)}, missing_phone={missing_phone_count}")
             return {"status": "reminder_selection_started", "eligible": len(eligible)}
         except Exception as reminder_err:
             print(f"❌ REMINDER LIST ERROR: {reminder_err}")
@@ -1133,9 +1133,9 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
             reminder_state["stage"] = "confirming"
             reminder_state["expires_at"] = datetime.now(timezone.utc) + REMINDER_SESSION_TTL
             preview_lines = ["🔎 *XUSUUSINTA LA DOORTAY*", ""]
-            for customer in selected_customers:
+            for debtor in selected_customers:
                 preview_lines.append(
-                    f"• {customer.get('name')} — ${float(customer.get('amount') or 0):.2f}"
+                    f"• {debtor.get('name')} — ${float(debtor.get('amount') or 0):.2f}"
                 )
             total = sum(float(row.get("amount") or 0) for row in selected_customers)
             preview_lines.extend([
@@ -1194,10 +1194,10 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
 
                     send_ok = send_whatsapp(
                         target_phone,
-                        build_payment_reminder(
+                        build_debt_reminder(
                             fresh,
-                            business_user.get("name"),
-                            business_user.get("phone_number") or sender_phone,
+                            shopkeeper.get("name"),
+                            shopkeeper.get("phone_number") or sender_phone,
                         ),
                     )
                     if send_ok is False:
@@ -1206,7 +1206,7 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
                         sent_count += 1
                 except Exception as send_err:
                     failed_count += 1
-                    print(f"❌ REMINDER SEND ERROR for customer id={original.get('id')}: {send_err}")
+                    print(f"❌ REMINDER SEND ERROR for debtor id={original.get('id')}: {send_err}")
 
             report = (
                 "📣 *NATIIJADA XUSUUSINTA*\n\n"
@@ -1288,7 +1288,7 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
                 print("🛟 Continuing through shared Supabase transaction logic; Groq will be tried again on the next message.")
             else:
                 # A plain customer name is a safe SEARCH only if it matches this
-                # business_user's own records; unsupported text must never create debt.
+                # shopkeeper's own records; unsupported text must never create debt.
                 raw_query = str(message_text or "").strip()
                 has_date_words = bool(re.search(
                     r"\b(?:today|tomorrow|maanta|berri|jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b|\b\d{4}-\d{1,2}-\d{1,2}\b|\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b",
@@ -1296,7 +1296,7 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
                 ))
                 if raw_query and not has_date_words and not re.search(r"[,$]\s*\d|\d\s*\$", raw_query):
                     try:
-                        fallback_matches = find_customer_matches(business_user_id, raw_query)
+                        fallback_matches = find_debtor_matches(business_user_id, raw_query)
                     except Exception as fallback_err:
                         print(f"⚠️ Local customer-search fallback failed: {fallback_err}")
                         fallback_matches = []
@@ -1441,7 +1441,7 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
         # Recover the full stored name from the original WhatsApp message if AI shortened it.
         if name and action in {"PAY", "EDIT", "DELETE", "HISTORY", "SEARCH"}:
             try:
-                recovered_name = resolve_customer_name_from_original_message(
+                recovered_name = resolve_name_from_original_message(
                     business_user_id, message_text, name
                 )
                 if recovered_name:
@@ -1465,7 +1465,7 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
                 # Keep promised_date as None when the user did not specify a due date.
                 
                 if new_phone and not amount:
-                    phone_matches = find_customer_matches(business_user_id, name)
+                    phone_matches = find_debtor_matches(business_user_id, name)
                     distinct_phone_names = {normalize_customer_name(d.get("name")) for d in phone_matches}
                     if len(distinct_phone_names) > 1:
                         ask_for_full_name(sender_phone, phone_matches, "EDIT")
@@ -1483,16 +1483,16 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
                         continue
                     else:
                         send_whatsapp(sender_phone, f"❌ Lama helin qofka {name} si lambarkiisa loo kaydiyo.")
-                        failed_inserts.append({"name": name, "reason": "Customer not found for phone update"})
+                        failed_inserts.append({"name": name, "reason": "Debtor not found for phone update"})
                         continue
                 
                 # Amounts without an explicit EDIT / "ka dhig" are additive.
                 # If this customer already has exactly one active debt, update
-                # that row instead of creating a duplicate customer/debt record.
+                # that row instead of creating a duplicate debtor/debt record.
                 # If the name is ambiguous or multiple active rows exist, ask
                 # the user rather than changing the wrong balance.
                 if amount is not None and not new_phone:
-                    matches = find_customer_matches(business_user_id, name)
+                    matches = find_debtor_matches(business_user_id, name)
                     distinct_names = {normalize_customer_name(row.get("name")) for row in matches}
                     if len(distinct_names) > 1:
                         ask_for_full_name(sender_phone, matches, "EDIT")
@@ -1562,7 +1562,7 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
                         name = matches[0].get("name") or name
                         entry["customer_name"] = name
 
-                customer_data = {
+                debtor_data = {
                     'business_user_id': business_user_id,
                     'name': name,
                     'amount': float(amount) if amount is not None else 0,
@@ -1571,7 +1571,7 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
                     'is_paid': False
                 }
 
-                result = supabase.table("customers").insert(customer_data).execute()
+                result = supabase.table("customers").insert(debtor_data).execute()
                 if not result.data:
                     send_whatsapp(sender_phone, f"❌ Deynta {name} lama diiwaangelin. Database-ku wax jawaab ah ma soo celin.")
                     failed_inserts.append({"name": name, "reason": "Insert returned no rows"})
@@ -1585,32 +1585,32 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
             try:
                 payment_amount = entry.get("amount")
                 payment_type = str(entry.get("payment_type") or "UNKNOWN").upper()
-                matches = find_customer_matches(business_user_id, name)
+                matches = find_debtor_matches(business_user_id, name)
 
                 if len(matches) == 0:
                     send_whatsapp(sender_phone, f"❌ Lama helin deynta aan weli la bixin ee {name}.")
-                    failed_inserts.append({"name": name, "reason": "Unpaid customer not found"})
+                    failed_inserts.append({"name": name, "reason": "Unpaid debtor not found"})
                     continue
 
                 if len(matches) > 1:
                     ask_for_full_name(sender_phone, matches, "PAY")
                     continue
 
-                customer = matches[0]
-                current_balance = float(customer.get("amount") or 0)
+                debtor = matches[0]
+                current_balance = float(debtor.get("amount") or 0)
 
-                if current_balance <= 0 or customer.get("is_paid") is True:
-                    send_whatsapp(sender_phone, f"✅ {customer['name']} hore ayuu u bixiyay deyntiisa.")
+                if current_balance <= 0 or debtor.get("is_paid") is True:
+                    send_whatsapp(sender_phone, f"✅ {debtor['name']} hore ayuu u bixiyay deyntiisa.")
                     continue
 
                 # A missing amount is a full payment ONLY when the AI explicitly says FULL.
                 if payment_amount is None and payment_type != "FULL":
                     send_whatsapp(
                         sender_phone,
-                        f"💵 {customer['name']} lacag intee le'eg ayaad ka heshay?\n"
-                        f"Tusaale: {customer['name']} ka jar $10.\n"
+                        f"💵 {debtor['name']} lacag intee le'eg ayaad ka heshay?\n"
+                        f"Tusaale: {debtor['name']} ka jar $10.\n"
                         "Haddii uu deynta oo dhan bixiyay, qor: "
-                        f"{customer['name']} wuu bixiyay deyntii oo dhan."
+                        f"{debtor['name']} wuu bixiyay deyntii oo dhan."
                     )
                     continue
 
@@ -1630,7 +1630,7 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
                 if payment_amount - current_balance > 0.009:
                     send_whatsapp(
                         sender_phone,
-                        f"⚠️ {customer['name']} haraaga deyntiisu waa ${current_balance:.2f}, "
+                        f"⚠️ {debtor['name']} haraaga deyntiisu waa ${current_balance:.2f}, "
                         f"laakiin waxaad sheegtay ${payment_amount:.2f}. Lacag-bixinta lama diiwaangelin "
                         "si aan haraaga uga dhigin tiro taban. Hubi lacagta oo mar kale dir."
                     )
@@ -1642,7 +1642,7 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
                 # Atomically insert the payment and update the balance inside PostgreSQL.
                 # Apply the companion SQL migration file before deploying this version.
                 rpc_result = supabase.rpc("record_debt_payment", {
-                    "p_customer_id": str(customer["id"]),
+                    "p_customer_id": str(debtor["id"]),
                     "p_business_user_id": str(business_user_id),
                     "p_amount": actual_payment,
                 }).execute()
@@ -1651,20 +1651,20 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
                     rpc_data = rpc_data[0] if rpc_data else None
                 if not isinstance(rpc_data, dict) or not rpc_data.get("id"):
                     raise RuntimeError("record_debt_payment returned no debt row; apply supabase_record_debt_payment.sql and check RLS")
-                updated_customer = rpc_data
-                new_balance = float(updated_customer.get("amount") or 0)
-                is_now_paid = bool(updated_customer.get("is_paid")) or new_balance <= 0
+                updated_debtor = rpc_data
+                new_balance = float(updated_debtor.get("amount") or 0)
+                is_now_paid = bool(updated_debtor.get("is_paid")) or new_balance <= 0
                 if is_now_paid:
                     send_whatsapp(
                         sender_phone,
-                        f"✅ {updated_customer['name']} deyntii oo dhan waa la bixiyay. "
+                        f"✅ {updated_debtor['name']} deyntii oo dhan waa la bixiyay. "
                         f"Lacagta la diiwaangeliyay: ${actual_payment:.2f}."
                     )
                 else:
                     send_whatsapp(
                         sender_phone,
-                        f"✅ {updated_customer['name']} wuxuu bixiyay ${actual_payment:.2f}. "
-                        f"Haray: ${float(updated_customer['amount']):.2f}."
+                        f"✅ {updated_debtor['name']} wuxuu bixiyay ${actual_payment:.2f}. "
+                        f"Haray: ${float(updated_debtor['amount']):.2f}."
                     )
 
             except Exception as e:
@@ -1740,11 +1740,11 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
                 today = today_eat()
 
                 for index, debt in enumerate(debts_query.data, start=1):
-                    customer_name = debt["name"]
-                    customer_amount = float(debt["amount"])
+                    debtor_name = debt["name"]
+                    debtor_amount = float(debt["amount"])
                     due_date = debt.get("promised_date")
 
-                    total += customer_amount
+                    total += debtor_amount
 
                     if wants_due_dates:
                         status = ""
@@ -1773,14 +1773,14 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
                                 status = f" 📅 {due_date}"
 
                         debt_list.append(
-                            f"{index}. {customer_name}: "
-                            f"${customer_amount:.2f}{status} "
+                            f"{index}. {debtor_name}: "
+                            f"${debtor_amount:.2f}{status} "
                             f"— Ballan: {due_date or 'lama gelin'}"
                         )
                     else:
                         debt_list.append(
-                            f"{index}. {customer_name}: "
-                            f"${customer_amount:.2f}"
+                            f"{index}. {debtor_name}: "
+                            f"${debtor_amount:.2f}"
                         )
 
                 message = (
@@ -1818,11 +1818,11 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
 
         elif action == "EDIT":
             try:
-                matches = find_customer_matches(business_user_id, name)
+                matches = find_debtor_matches(business_user_id, name)
 
                 if len(matches) == 0:
                     send_whatsapp(sender_phone, f"❌ Lama helin deynta aan weli la bixin ee {name}.")
-                    failed_inserts.append({"name": name, "reason": "Customer not found"})
+                    failed_inserts.append({"name": name, "reason": "Debtor not found"})
                     continue
 
                 if date_only_update:
@@ -1864,7 +1864,7 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
                     ask_for_full_name(sender_phone, matches, "EDIT")
                     continue
 
-                customer = matches[0]
+                debtor = matches[0]
                 update_data = {}
 
                 # Fallbacks support inconsistent model output, e.g. amount instead of new_amount.
@@ -1904,7 +1904,7 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
                 result = (
                     supabase.table("customers")
                     .update(update_data)
-                    .eq("id", customer["id"])
+                    .eq("id", debtor["id"])
                     .eq("business_user_id", business_user_id)
                     .select("id, name, amount, promised_date, is_paid")
                     .execute()
@@ -1917,9 +1917,9 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
                 updated = result.data[0]
                 changes = []
                 if "amount" in update_data:
-                    changes.append(f"💵 Lacag: ${float(customer['amount']):.2f} → ${float(updated['amount']):.2f}")
+                    changes.append(f"💵 Lacag: ${float(debtor['amount']):.2f} → ${float(updated['amount']):.2f}")
                 if "promised_date" in update_data:
-                    changes.append(f"📅 Ballan: {customer.get('promised_date') or 'lama gelin'} → {updated['promised_date']}")
+                    changes.append(f"📅 Ballan: {debtor.get('promised_date') or 'lama gelin'} → {updated['promised_date']}")
 
                 send_whatsapp(sender_phone, f"✅ {updated['name']} waa la cusboonaysiiyay:\n" + "\n".join(changes))
                 successful_inserts.append(entry)
@@ -1931,13 +1931,13 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
         
         elif action == "DELETE":
             try:
-                matches = find_customer_matches(business_user_id, name)
+                matches = find_debtor_matches(business_user_id, name)
 
                 if len(matches) == 0:
                     send_whatsapp(sender_phone, f"❌ Lama helin {name}.")
                     failed_inserts.append({
                         "name": name,
-                        "reason": "Customer not found"
+                        "reason": "Debtor not found"
                     })
                     continue
 
@@ -1945,19 +1945,19 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
                     ask_for_full_name(sender_phone, matches, "DELETE")
                     continue
 
-                customer = matches[0]
+                debtor = matches[0]
 
                 (
                     supabase.table("customers")
                     .delete()
-                    .eq("id", customer["id"])
+                    .eq("id", debtor["id"])
                     .eq("business_user_id", business_user_id)
                     .execute()
                 )
 
                 send_whatsapp(
                     sender_phone,
-                    f"✅ Deynta {customer['name']} (${customer['amount']}) waa la tirtiray."
+                    f"✅ Deynta {debtor['name']} (${debtor['amount']}) waa la tirtiray."
                 )
                 successful_inserts.append(entry)
 
@@ -1974,7 +1974,7 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
         
         elif action == "SEARCH":
             try:
-                search_matches = find_customer_matches(business_user_id, name)
+                search_matches = find_debtor_matches(business_user_id, name)
                 if not search_matches:
                     send_whatsapp(sender_phone, f"❌ Lama helin qofka {name}. Hubi higgaadda magaca ama isku day magaciisa oo buuxa.")
                     continue
@@ -2021,7 +2021,7 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
         elif action == "HISTORY":
             try:
                 # Full customer statement: debt records, payment events, and current outstanding balance.
-                history_matches = find_customer_matches(business_user_id, name)
+                history_matches = find_debtor_matches(business_user_id, name)
 
                 if not history_matches:
                     send_whatsapp(
@@ -2491,159 +2491,293 @@ Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
 
 
 def cron_authorized(request: Request):
+    """Authorize Render cron requests with CRON_SECRET.
+
+    Render cron jobs should send either x-cron-secret or Authorization: Bearer <secret>.
+    """
     secret = os.getenv("CRON_SECRET", "").strip()
     if not secret:
-        # Fail closed: configure CRON_SECRET in the deployment environment.
         return False
-    supplied = request.headers.get("x-cron-secret", "")
-    auth = request.headers.get("authorization", "")
+
+    supplied = request.headers.get("x-cron-secret", "").strip()
+    auth = request.headers.get("authorization", "").strip()
     if auth.lower().startswith("bearer "):
         supplied = auth[7:].strip()
-    return hmac.compare_digest(supplied, secret)
+
+    return bool(supplied) and hmac.compare_digest(supplied, secret)
+
+
+def _cron_date_boundaries():
+    """Return today's East Africa date and UTC database boundaries."""
+    today = today_eat()
+    start_utc = datetime.combine(
+        today,
+        datetime.min.time(),
+        tzinfo=EAT,
+    ).astimezone(timezone.utc)
+    end_utc = start_utc + timedelta(days=1)
+    return today, start_utc.isoformat(), end_utc.isoformat()
+
+
+def _safe_money(value):
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
 
 @app.get("/cron/daily-digest")
 async def daily_digest(request: Request):
+    """Send daily due/overdue reminders to every registered business user.
+
+    This endpoint is intentionally lightweight:
+    - only required database columns are selected
+    - one business user's failure does not stop the others
+    - WhatsApp calls already have a 10-second timeout in send_whatsapp()
+    - logs contain counts rather than every database row
+    """
     if not cron_authorized(request):
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Unauthorized cron request")
+
     print("🔔 DAILY DIGEST STARTED")
     today = today_eat().isoformat()
-    print(f"📅 Today's date: {today}")
-    
-    business_users = supabase.table("business_users").select("*").execute()
-    print(f"👥 Found {len(business_users.data)} business users")
-    
-    for sk in business_users.data:
-        business_user_id = sk["id"]
-        sk_phone = sk["phone_number"]
-        print(f"📱 Processing business user: {sk_phone} (ID: {business_user_id})")
-        
-        debt_records = supabase.table("customers").select("*").eq("business_user_id", business_user_id).eq("is_paid", False).execute()
-        print(f"💰 Found {len(debt_records.data)} unpaid debts")
-        
-        if not debt_records.data:
-            print("⚠️ No debts, skipping...")
+
+    sent_count = 0
+    skipped_count = 0
+    error_count = 0
+
+    try:
+        users_result = (
+            supabase.table("business_users")
+            .select("id, phone_number, name")
+            .execute()
+        )
+        users = users_result.data or []
+        print(f"👥 Business users found: {len(users)}")
+    except Exception as e:
+        print(f"❌ DAILY DIGEST database error loading business users: {type(e).__name__}: {e}")
+        return {"status": "database_error"}
+
+    for user in users:
+        business_user_id = user.get("id")
+        phone = str(user.get("phone_number") or "").strip()
+        name = str(user.get("name") or "").strip()
+
+        if not business_user_id or not phone:
+            skipped_count += 1
             continue
-            
-        due_today = []
-        for record in debt_records.data:
-            print(f"  - Checking: {record['name']}, due: {record['promised_date']}")
-            due_date = record.get("promised_date")
-            if not due_date:
-                # Debts without a due date must not crash the reminder job.
+
+        try:
+            debts_result = (
+                supabase.table("customers")
+                .select("name, amount, promised_date")
+                .eq("business_user_id", business_user_id)
+                .eq("is_paid", False)
+                .order("promised_date", desc=False)
+                .execute()
+            )
+            debts = debts_result.data or []
+
+            due_today = []
+            for debt in debts:
+                due_date = debt.get("promised_date")
+                if not due_date:
+                    continue
+                if str(due_date) <= today:
+                    due_today.append(
+                        f"• {debt.get('name') or 'Macmiil'}: "
+                        f"${_safe_money(debt.get('amount')):.2f} "
+                        f"(ballan: {due_date})"
+                    )
+
+            if not due_today:
+                skipped_count += 1
                 continue
-            if str(due_date) <= today:
-                print(f"  ✅ Adding to due_today: {record['name']}")
-                due_today.append(f"• {record['name']}: ${float(record.get('amount') or 0):.2f} (ballan: {due_date})")
-        
-        if due_today:
-            print(f"📤 Sending message to {sk_phone}")
-            msg = "☀️ *Xasuusinta Maalinle ah ee Daynjir* ☀️\n\n*Balamaha maanta & kuwa dhaafay: *\n" + "\n".join(due_today)
-            send_whatsapp(sk_phone, msg)
-        else:
-            print("⚠️ No debts due today")
-            
-    print("✅ DAILY DIGEST COMPLETED")
-    return {"status": "done"}
-  
+
+            # Keep scheduled messages reasonably sized. The complete customer
+            # list remains available through LIST/HISTORY in WhatsApp.
+            max_items = 40
+            shown = due_today[:max_items]
+            omitted = len(due_today) - len(shown)
+
+            message_lines = [
+                "☀️ *Xasuusinta Maalinle ah ee Daynjir* ☀️",
+                "",
+                "*Balamaha maanta & kuwa dhaafay:*",
+                *shown,
+            ]
+            if omitted > 0:
+                message_lines.extend([
+                    "",
+                    f"➕ {omitted} kale ayaa jira. Qor *Liiska daynta* si aad u aragto dhammaan.",
+                ])
+
+            if name:
+                message_lines.insert(1, f"👤 *{name}*")
+
+            ok = send_whatsapp(phone, "\n".join(message_lines))
+            if ok:
+                sent_count += 1
+                print(f"✅ Daily digest sent: user={business_user_id}, items={len(due_today)}")
+            else:
+                error_count += 1
+                print(f"❌ Daily digest WhatsApp failed: user={business_user_id}")
+
+        except Exception as e:
+            error_count += 1
+            print(
+                f"❌ Daily digest user failed: user={business_user_id}, "
+                f"{type(e).__name__}: {e}"
+            )
+            continue
+
+    print(
+        f"🏁 DAILY DIGEST FINISHED: sent={sent_count}, "
+        f"skipped={skipped_count}, errors={error_count}"
+    )
+    return {
+        "status": "done",
+        "sent": sent_count,
+        "skipped": skipped_count,
+        "errors": error_count,
+    }
+
+
 @app.get("/cron/evening-checkin")
 async def evening_checkin(request: Request):
+    """Send a compact end-of-day activity summary to each business user."""
     if not cron_authorized(request):
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Unauthorized cron request")
-    # East Africa Time is UTC+3.
-    now_eat_value = now_eat()
-    today = now_eat_value.date()
 
-    # Use UTC boundaries for database timestamps.
-    start_utc = datetime.combine(today, datetime.min.time(), tzinfo=EAT).astimezone(timezone.utc)
-    end_utc = start_utc + timedelta(days=1)
+    print("🌙 EVENING CHECK-IN STARTED")
+    today, start_iso, end_iso = _cron_date_boundaries()
 
-    start_iso = start_utc.isoformat()
-    end_iso = end_utc.isoformat()
+    sent_count = 0
+    skipped_count = 0
+    error_count = 0
 
-    business_users = supabase.table("business_users").select("*").execute()
-
-    for business_user in business_users.data or []:
-        business_user_id = business_user["id"]
-        business_user_phone = business_user["phone_number"]
-
-        # Debts newly recorded today.
-        new_debts_result = (
-            supabase.table("customers")
-            .select("name, amount, created_at")
-            .eq("business_user_id", business_user_id)
-            .gte("created_at", start_iso)
-            .lt("created_at", end_iso)
+    try:
+        users_result = (
+            supabase.table("business_users")
+            .select("id, phone_number, name")
             .execute()
         )
-        new_debts = new_debts_result.data or []
+        users = users_result.data or []
+        print(f"👥 Business users found: {len(users)}")
+    except Exception as e:
+        print(f"❌ EVENING CHECK-IN database error loading business users: {type(e).__name__}: {e}")
+        return {"status": "database_error"}
 
-        # Payments recorded today.
-        payments_result = (
-            supabase.table("payments")
-            .select("amount, paid_at, customer_id")
-            .eq("business_user_id", business_user_id)
-            .gte("paid_at", start_iso)
-            .lt("paid_at", end_iso)
-            .execute()
-        )
-        payments = payments_result.data or []
+    for user in users:
+        business_user_id = user.get("id")
+        phone = str(user.get("phone_number") or "").strip()
+        name = str(user.get("name") or "").strip()
 
-        lines = ["🌙 *Natiijada maanta*"]
+        if not business_user_id or not phone:
+            skipped_count += 1
+            continue
 
-        if not new_debts and not payments:
-            lines.extend([
-                "",
-                "Maanta maxaa deyn soo xarooday, maxaase kaa baxay?",
-            ])
-        else:
+        try:
+            # Load today's customers once. This avoids one Supabase request per payment.
+            customers_result = (
+                supabase.table("customers")
+                .select("id, name, amount, created_at")
+                .eq("business_user_id", business_user_id)
+                .execute()
+            )
+            customers = customers_result.data or []
+            customer_by_id = {str(row.get("id")): row for row in customers}
+
+            new_debts = []
+            for customer in customers:
+                created_at = customer.get("created_at")
+                if created_at and start_iso <= str(created_at) < end_iso:
+                    new_debts.append(customer)
+
+            payments_result = (
+                supabase.table("payments")
+                .select("amount, paid_at, customer_id")
+                .eq("business_user_id", business_user_id)
+                .gte("paid_at", start_iso)
+                .lt("paid_at", end_iso)
+                .execute()
+            )
+            payments = payments_result.data or []
+
+            lines = ["🌙 *Natiijada maanta*"]
+            if name:
+                lines.append(f"👤 *{name}*")
             lines.append("")
 
-            if new_debts:
-                lines.append("🆕 *Liiska Deymaha kaa baxay maanta:*")
-              
-                for debt in new_debts:
-                    lines.append(
-                        f"• {debt['name']}: ${float(debt['amount']):.2f}"
-                    )
-
-
-            if payments:
-                lines.append("")
-                lines.append("💵 *Daynta maanta kuusoo xarootay:*")
-
-                for payment in payments:
-                    customer_result = (
-                        supabase.table("customers")
-                        .select("name")
-                        .eq("id", payment["customer_id"])
-                        .eq("business_user_id", business_user_id)
-                        .limit(1)
-                        .execute()
-                    )
-                    customer_name = (
-                        customer_result.data[0]["name"]
-                        if customer_result.data
-                        else "Macmiil"
-                    )
-                    lines.append(
-                        f"• {customer_name}: ${float(payment['amount']):.2f}"
-                    )
+            if not new_debts and not payments:
+                lines.append("Maanta wax deyn cusub ama lacag-bixin ah lama diiwaangelin.")
             else:
-                lines.append("")
-                lines.append("💵 Ma jirto lacag-bixin la diiwaangeliyay maanta.")
+                if new_debts:
+                    lines.append("🆕 *Deymaha cusub maanta:*")
+                    for debt in new_debts[:40]:
+                        lines.append(
+                            f"• {debt.get('name') or 'Macmiil'}: "
+                            f"${_safe_money(debt.get('amount')):.2f}"
+                        )
+                    if len(new_debts) > 40:
+                        lines.append(f"• ➕ {len(new_debts) - 40} kale")
+
+                if payments:
+                    lines.append("")
+                    lines.append("💵 *Lacagihii maanta la helay:*")
+                    total_paid = 0.0
+                    for payment in payments[:40]:
+                        amount = _safe_money(payment.get("amount"))
+                        total_paid += amount
+                        customer = customer_by_id.get(str(payment.get("customer_id")), {})
+                        customer_name = customer.get("name") or "Macmiil"
+                        lines.append(f"• {customer_name}: ${amount:.2f}")
+                    if len(payments) > 40:
+                        lines.append(f"• ➕ {len(payments) - 40} kale")
+                    lines.append(f"*Wadarta lacagta la helay: ${sum(_safe_money(p.get('amount')) for p in payments):.2f}*")
+
+                if new_debts:
+                    total_new = sum(_safe_money(d.get("amount")) for d in new_debts)
+                    lines.append(f"\n*Wadarta deynta cusub: ${total_new:.2f}*")
 
             lines.extend([
                 "",
-                "Hadii ay jiraan Deymo kale oo maanta soo xarooday "
-                "ama mid cusub oo baxday?",
-                "fadlan ii soo dir magaca iyo lacagta."
+                "Fadlan ii soo dir magaca iyo lacagta haddii aad rabto inaad diiwaangeliso deyn cusub ama lacag-bixin."
             ])
 
-        send_whatsapp(business_user_phone, "\n".join(lines))
+            ok = send_whatsapp(phone, "\n".join(lines))
+            if ok:
+                sent_count += 1
+                print(
+                    f"✅ Evening check-in sent: user={business_user_id}, "
+                    f"new_debts={len(new_debts)}, payments={len(payments)}"
+                )
+            else:
+                error_count += 1
+                print(f"❌ Evening check-in WhatsApp failed: user={business_user_id}")
 
-    return {"status": "evening_checkin_sent"}
+        except Exception as e:
+            error_count += 1
+            print(
+                f"❌ Evening check-in user failed: user={business_user_id}, "
+                f"{type(e).__name__}: {e}"
+            )
+            continue
+
+    print(
+        f"🏁 EVENING CHECK-IN FINISHED: sent={sent_count}, "
+        f"skipped={skipped_count}, errors={error_count}"
+    )
+    return {
+        "status": "done",
+        "sent": sent_count,
+        "skipped": skipped_count,
+        "errors": error_count,
+        "date": today.isoformat(),
+    }
+
 
 if __name__ == "__main__":
     import uvicorn
