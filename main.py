@@ -1020,37 +1020,38 @@ async def whatsapp_webhook(request: Request):
             send_whatsapp(sender_phone, "❌ Could not update the request. Check server logs.")
             return {"status": "approval_update_error"}
 
-    # Find this sender's shopkeeper; do NOT auto-create unknown senders here.
-    try:
-        sk_query = (
-            supabase.table("business_users")
-            .select("id, phone_number, name, approval_status")
-            .eq("phone_number", sender_phone)
-            .execute()
+    # Find this sender's business user; do NOT auto-create unknown senders here.
+try:
+    business_user_query = (
+        supabase.table("business_users")
+        .select("id, phone_number, name, approval_status")
+        .eq("phone_number", sender_phone)
+        .execute()
+    )
+
+    if not business_user_query.data:
+        send_whatsapp(
+            sender_phone,
+            "⏳ Ku soo dhawoow Daynjir.\n\n"
+            "Lambarkan wuxuu u adeegaa maamulka ganacsiyada.\n"
+            "Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
         )
+        return {"status": "not_registered"}
 
-        if not sk_query.data:
-            send_whatsapp(
-    sender_phone,
-    "⏳ Ku soo dhawoow Daynjir.\n\n"
-    "Lambarkan wuxuu u adeegaa maamulka ganacsiyada.\n"
-    "Haddii aad rabto inaad isticmaasho Daynjir, fadlan la xiriir: +252633732215."
-)
-return {"status": "not_registered"}
+    business_user = business_user_query.data[0]
 
-        shopkeeper = sk_query.data[0]
-        if shopkeeper.get("approval_status") != "approved":
-            send_whatsapp(
-                sender_phone,
-                "⏳ Your request is pending approval. Please wait for the owner."
-            )
-            return {"status": "not_approved"}
+    if business_user.get("approval_status") != "approved":
+        send_whatsapp(
+            sender_phone,
+            "⏳ Your request is pending approval. Please wait for the owner."
+        )
+        return {"status": "not_approved"}
 
-        business_user_id = shopkeeper["id"]
+    business_user_id = business_user["id"]
 
-    except Exception as db_err:
-        print(f"❌ DATABASE ERROR (Shopkeepers Lookup): {db_err}")
-        return {"status": "shopkeeper_db_error"}
+except Exception as db_err:
+    print(f"❌ DATABASE ERROR (Business User Lookup): {db_err}")
+    return {"status": "business_user_db_error"}
 
     # Manual debt-reminder workflow: fully rule-based, no Groq request.
     # Start: XUSUUSIN -> numbered unpaid-debtor list -> "1,3" -> confirmation.
